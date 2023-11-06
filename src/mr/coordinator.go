@@ -51,6 +51,7 @@ func (c *Coordinator) GetTask(args *TaskArgs, reply *Task) error {
 					reply.ReduceSum = c.nReduce
 					reply.Filename  =  c.files[i]
 					c.TimesfinishedMapfiles[i] = time.Now()
+					fmt.Printf("GetTask:%d %d %v %v\n",reply.TaskNum,reply.TaskType,time.Now(),v)
 					return nil
 				}
 			}else {  
@@ -92,9 +93,10 @@ func (c *Coordinator) GetTask(args *TaskArgs, reply *Task) error {
 }
 
 func (c *Coordinator) CheckIsFinish (tp TaskType)bool {
-	count := 0
+	
 	switch tp {		
 		case MapTask:
+			count := 0
 			for  _,v:= range c.finishedMapfiles {
 				if v {
 					count ++ 
@@ -106,6 +108,7 @@ func (c *Coordinator) CheckIsFinish (tp TaskType)bool {
 			return false
 
 		case ReduceTask:
+			count := 0
 			for  _,v:= range c.finishedReducefiles {
 				if v {
 					count ++ 
@@ -127,8 +130,7 @@ func (c *Coordinator) CheckIsFinish (tp TaskType)bool {
 func (c *Coordinator) FinishedTask(args *FinishArgs, reply *Task) error {
 	//标记任务是否完成
 	//todo 有必要加锁吗， 确实是共享的变量 - - > 可以确保读的时候的正确性、
-	c.mu.Lock()
-	defer c.mu.Unlock()
+
 	switch args.Ts.TaskType {
 		case MapTask:
 			c.finishedMapfiles[args.Ts.TaskNum] = true

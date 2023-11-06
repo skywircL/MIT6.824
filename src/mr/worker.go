@@ -7,6 +7,7 @@ import (
 	"log"
 	"sort"
 	"net/rpc"
+	"time"
 	"io"
 	"os"
 )
@@ -54,7 +55,7 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 func DoneTask(task Task) Task {
-
+	fmt.Printf("testMap:%d %d %v\n",task.TaskNum,task.TaskType,time.Now())
 	args := FinishArgs{
 		Ts :task,
 	}
@@ -62,7 +63,7 @@ func DoneTask(task Task) Task {
 	ok := call("Coordinator.FinishedTask", &args, &reply)
 
 	if ok {
-		fmt.Println(reply)
+		fmt.Println(time.Now(),reply)
 	} else {
 		fmt.Printf("call failed!\n")
 	}
@@ -81,7 +82,9 @@ func DoMap(mapf func(string, string) []KeyValue, raw Task) {//这里应该有并
 		log.Fatalf("cannot read %v", raw.Filename)
 	}
 	file.Close()
+	
 	kva := mapf(raw.Filename, string(content))
+	
 	//intermediate = append(intermediate, kva...)
 	//create intermediate file  what's the mean of k and y
 
