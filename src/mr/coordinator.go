@@ -130,7 +130,7 @@ func (c *Coordinator) CheckIsFinish (tp TaskType)bool {
 func (c *Coordinator) FinishedTask(args *FinishArgs, reply *Task) error {
 	//标记任务是否完成
 	//todo 有必要加锁吗， 确实是共享的变量 - - > 可以确保读的时候的正确性、
-
+	//final ： 不加锁是正确的，不然会触发job count 的error
 	switch args.Ts.TaskType {
 		case MapTask:
 			c.finishedMapfiles[args.Ts.TaskNum] = true
