@@ -1,0 +1,353 @@
+Test (2A): initial election ...
+[candidate] 0 1 2023-11-18 17:34:06.466003366 +0800 CST m=+0.205151312
+[vote time] 2 1 0 -1 0 2023-11-18 17:34:06.466309227 +0800 CST m=+0.205457173
+[vote time] 1 1 0 -1 0 2023-11-18 17:34:06.46635328 +0800 CST m=+0.205501226
+0 {1 true} false 1 1
+[count num] 2 0
+[election leader] 0
+0 {1 true} true 2 1
+[count num] 3 0
+[election leader] 0
+labgob warning: Decoding into a non-default variable/field Term may not work
+  ... Passed --   3.0  3   54   11182    0
+Test (2A): election after network failure ...
+[candidate] 0 1 2023-11-18 17:34:09.460381175 +0800 CST m=+3.199529131
+[vote time] 2 1 0 -1 0 2023-11-18 17:34:09.460596785 +0800 CST m=+3.199744731
+[vote time] 1 1 0 -1 0 2023-11-18 17:34:09.460598017 +0800 CST m=+3.199745963
+0 {1 true} false 1 1
+[count num] 2 0
+[election leader] 0
+0 {1 true} true 2 1
+[count num] 3 0
+[election leader] 0
+[candidate] 1 2 2023-11-18 17:34:09.896739591 +0800 CST m=+3.635887547
+[vote time] 2 2 1 0 1 2023-11-18 17:34:09.896926155 +0800 CST m=+3.636074101
+1 {2 true} false 1 2
+[count num] 2 1
+[election leader] 1
+[candidate] 2 3 2023-11-18 17:34:11.050025034 +0800 CST m=+4.789172980
+[candidate] 0 3 2023-11-18 17:34:11.053224318 +0800 CST m=+4.792372304
+0 {0 false} false 1 3
+1 {0 false} true 2 2
+[candidate] 0 4 2023-11-18 17:34:11.395826481 +0800 CST m=+5.134974437
+[candidate] 2 4 2023-11-18 17:34:11.400009452 +0800 CST m=+5.139157398
+[candidate] 2 5 2023-11-18 17:34:11.632755858 +0800 CST m=+5.371903804
+[candidate] 0 5 2023-11-18 17:34:11.745673196 +0800 CST m=+5.484821182
+[candidate] 2 6 2023-11-18 17:34:11.872137481 +0800 CST m=+5.611285437
+[candidate] 0 6 2023-11-18 17:34:11.948380247 +0800 CST m=+5.687528203
+[candidate] 2 7 2023-11-18 17:34:12.187901467 +0800 CST m=+5.927049423
+2 {0 false} false 1 7
+[candidate] 0 7 2023-11-18 17:34:12.285597118 +0800 CST m=+6.024745064
+[candidate] 2 8 2023-11-18 17:34:12.498154916 +0800 CST m=+6.237302862
+[candidate] 0 8 2023-11-18 17:34:12.546387734 +0800 CST m=+6.285535680
+[candidate] 2 9 2023-11-18 17:34:12.680128812 +0800 CST m=+6.419276758
+2 {0 false} false 1 9
+[candidate] 0 9 2023-11-18 17:34:12.753449661 +0800 CST m=+6.492597617
+[candidate] 2 10 2023-11-18 17:34:12.907811076 +0800 CST m=+6.646959022
+[vote time] 0 10 9 0 2 2023-11-18 17:34:12.908011812 +0800 CST m=+6.647159758
+2 {10 true} false 1 10
+[count num] 2 2
+[election leader] 2
+2 {0 false} true 2 10
+0 {0 false} false 0 10
+2 {0 false} true 2 10
+  ... Passed --   4.5  3  134   20662    0
+Test (2A): multiple elections ...
+[candidate] 2 1 2023-11-18 17:34:13.989967472 +0800 CST m=+7.729115418
+[vote time] 6 1 0 -1 2 2023-11-18 17:34:13.99012486 +0800 CST m=+7.729272806
+[vote time] 0 1 0 -1 2 2023-11-18 17:34:13.990179875 +0800 CST m=+7.729327821
+2 {1 true} false 1 1
+[count num] 2 2
+[vote time] 3 1 0 -1 2 2023-11-18 17:34:13.990134664 +0800 CST m=+7.729282610
+[vote time] 4 1 0 -1 2 2023-11-18 17:34:13.990189012 +0800 CST m=+7.729336958
+2 {1 true} false 1 1
+[count num] 3 2
+2 {1 true} false 1 1
+2 {1 true} false 1 1
+[count num] 4 2
+[election leader] 2
+[count num] 5 2
+[election leader] 2
+[vote time] 1 1 0 -1 2 2023-11-18 17:34:13.990194408 +0800 CST m=+7.729342354
+[vote time] 5 1 0 -1 2 2023-11-18 17:34:13.990236933 +0800 CST m=+7.729384879
+2 {1 true} true 2 1
+[count num] 6 2
+2 {1 true} true 2 1
+[election leader] 2
+[count num] 7 2
+[election leader] 2
+0 {0 false} false 0 10
+[candidate] 4 2 2023-11-18 17:34:14.476639794 +0800 CST m=+8.215787740
+2 {0 false} true 2 10
+4 {0 false} false 1 2
+[candidate] 4 3 2023-11-18 17:34:14.817010587 +0800 CST m=+8.556158543
+[candidate] 0 2 2023-11-18 17:34:14.885421175 +0800 CST m=+8.624569121
+2 {0 false} true 2 10
+[candidate] 3 2 2023-11-18 17:34:14.988597381 +0800 CST m=+8.727745337
+0 {0 false} false 0 10
+[candidate] 4 4 2023-11-18 17:34:15.118588322 +0800 CST m=+8.857736278
+[candidate] 0 3 2023-11-18 17:34:15.199498268 +0800 CST m=+8.938646225
+[candidate] 3 3 2023-11-18 17:34:15.206638883 +0800 CST m=+8.945786839
+[candidate] 4 5 2023-11-18 17:34:15.279578549 +0800 CST m=+9.018726505
+[candidate] 3 4 2023-11-18 17:34:15.387281454 +0800 CST m=+9.126429410
+[vote time] 2 4 1 2 3 2023-11-18 17:34:15.387537946 +0800 CST m=+9.126685892
+[vote time] 4 4 5 4 3 2023-11-18 17:34:15.387548141 +0800 CST m=+9.126696087
+3 {4 true} false 1 4
+[count num] 2 3
+[vote time] 5 4 1 2 3 2023-11-18 17:34:15.387617918 +0800 CST m=+9.126765874
+3 {5 false} false 1 4
+3 {4 true} false 1 4
+[count num] 3 3
+[candidate] 0 4 2023-11-18 17:34:15.39163313 +0800 CST m=+9.130781076
+0 {0 false} false 1 4
+4 {0 false} false 1 5
+0 {0 false} false 1 4
+[candidate] 4 6 2023-11-18 17:34:15.4916153 +0800 CST m=+9.230763256
+[vote time] 5 6 4 3 4 2023-11-18 17:34:15.491865074 +0800 CST m=+9.231013030
+[vote time] 2 6 4 3 4 2023-11-18 17:34:15.491928996 +0800 CST m=+9.231076952
+[vote time] 3 6 5 -1 4 2023-11-18 17:34:15.491967549 +0800 CST m=+9.231115505
+4 {6 true} false 1 6
+[count num] 2 4
+4 {6 true} false 1 6
+[count num] 3 4
+4 {6 true} false 1 6
+[count num] 4 4
+[election leader] 4
+0 {0 false} false 1 4
+[candidate] 6 2 2023-11-18 17:34:15.535310169 +0800 CST m=+9.274458125
+[candidate] 1 2 2023-11-18 17:34:15.547524537 +0800 CST m=+9.286672493
+[candidate] 0 5 2023-11-18 17:34:15.603334604 +0800 CST m=+9.342482550
+6 {0 false} false 1 2
+2 {0 false} true 2 10
+2 {0 false} true 2 10
+4 {0 false} true 2 6
+3 {0 false} false 0 6
+3 {0 false} false 0 6
+[candidate] 6 3 2023-11-18 17:34:15.86960283 +0800 CST m=+9.608750786
+[candidate] 1 3 2023-11-18 17:34:15.886070992 +0800 CST m=+9.625218948
+[candidate] 5 7 2023-11-18 17:34:16.017276858 +0800 CST m=+9.756424804
+0 {0 false} false 0 10
+[candidate] 1 4 2023-11-18 17:34:16.048805109 +0800 CST m=+9.787953055
+[candidate] 6 4 2023-11-18 17:34:16.139675709 +0800 CST m=+9.878823665
+6 {0 false} false 1 4
+[candidate] 1 5 2023-11-18 17:34:16.236870725 +0800 CST m=+9.976018671
+6 {0 false} false 1 4
+[candidate] 5 8 2023-11-18 17:34:16.279984135 +0800 CST m=+10.019132081
+4 {0 false} true 2 6
+4 {0 false} true 2 6
+5 {0 false} false 1 8
+6 {0 false} false 1 4
+0 {0 false} false 0 10
+3 {0 false} false 0 6
+[candidate] 0 7 2023-11-18 17:34:16.421615783 +0800 CST m=+10.160763739
+1 {0 false} false 0 6
+0 {0 false} false 0 10
+1 {0 false} false 0 6
+[candidate] 3 7 2023-11-18 17:34:16.509407638 +0800 CST m=+10.248555584
+[vote time] 6 7 6 6 3 2023-11-18 17:34:16.509628678 +0800 CST m=+10.248776624
+[vote time] 5 7 8 5 3 2023-11-18 17:34:16.509659095 +0800 CST m=+10.248807041
+[vote time] 4 7 8 -1 3 2023-11-18 17:34:16.509674034 +0800 CST m=+10.248821980
+3 {8 false} false 1 7
+3 {7 true} false 1 7
+[count num] 2 3
+[vote time] 1 7 6 1 3 2023-11-18 17:34:16.509692319 +0800 CST m=+10.248840275
+3 {8 false} false 0 8
+3 {7 true} false 0 8
+[count num] 3 3
+[candidate] 2 7 2023-11-18 17:34:16.529625174 +0800 CST m=+10.268773130
+2 {0 false} true 2 10
+4 {0 false} false 0 8
+[candidate] 4 9 2023-11-18 17:34:16.585258576 +0800 CST m=+10.324406532
+[vote time] 3 9 8 -1 4 2023-11-18 17:34:16.585503601 +0800 CST m=+10.324651547
+[vote time] 5 9 8 5 4 2023-11-18 17:34:16.585529415 +0800 CST m=+10.324677361
+[vote time] 1 9 7 3 4 2023-11-18 17:34:16.585551116 +0800 CST m=+10.324699072
+4 {9 true} false 1 9
+[count num] 2 4
+[vote time] 6 9 7 3 4 2023-11-18 17:34:16.585503676 +0800 CST m=+10.324651622
+4 {9 true} false 1 9
+[count num] 3 4
+4 {9 true} false 1 9
+[count num] 4 4
+[election leader] 4
+4 {9 true} true 2 9
+[count num] 5 4
+[election leader] 4
+6 {0 false} false 0 9
+1 {0 false} false 0 9
+1 {0 false} false 0 9
+0 {0 false} false 0 10
+[candidate] 0 8 2023-11-18 17:34:16.760498821 +0800 CST m=+10.499646767
+[vote time] 6 8 9 4 0 2023-11-18 17:34:16.76068775 +0800 CST m=+10.499835706
+[vote time] 1 8 9 4 0 2023-11-18 17:34:16.760741872 +0800 CST m=+10.499889818
+0 {9 false} false 1 8
+[vote time] 3 8 9 4 0 2023-11-18 17:34:16.760691376 +0800 CST m=+10.499839322
+0 {9 false} false 0 9
+0 {9 false} false 0 9
+0 {0 false} false 0 9
+[candidate] 2 8 2023-11-18 17:34:16.856648236 +0800 CST m=+10.595796182
+0 {0 false} false 0 10
+6 {0 false} false 0 9
+[candidate] 5 10 2023-11-18 17:34:16.933162258 +0800 CST m=+10.672310204
+[candidate] 0 10 2023-11-18 17:34:16.944374843 +0800 CST m=+10.683522789
+[vote time] 3 10 9 4 0 2023-11-18 17:34:16.944563952 +0800 CST m=+10.683711898
+[vote time] 6 10 9 4 0 2023-11-18 17:34:16.944588349 +0800 CST m=+10.683736295
+0 {10 true} false 1 10
+[count num] 2 0
+[vote time] 1 10 9 4 0 2023-11-18 17:34:16.944588379 +0800 CST m=+10.683736325
+0 {10 true} false 1 10
+[count num] 3 0
+0 {10 true} false 1 10
+[count num] 4 0
+[election leader] 0
+1 {0 false} false 0 10
+2 {0 false} true 2 10
+3 {0 false} false 0 10
+4 {0 false} true 2 9
+6 {0 false} false 0 10
+2 {0 false} false 1 8
+0 {0 false} true 2 10
+[candidate] 2 9 2023-11-18 17:34:17.185036437 +0800 CST m=+10.924184383
+0 {0 false} false 0 10
+4 {0 false} true 2 9
+[candidate] 5 11 2023-11-18 17:34:17.19347698 +0800 CST m=+10.932624926
+4 {0 false} true 2 9
+2 {0 false} true 2 10
+[candidate] 6 11 2023-11-18 17:34:17.365641893 +0800 CST m=+11.104789839
+3 {0 false} false 0 10
+[candidate] 0 12 2023-11-18 17:34:17.393471203 +0800 CST m=+11.132619149
+[vote time] 5 12 11 5 0 2023-11-18 17:34:17.393695579 +0800 CST m=+11.132843525
+[vote time] 2 12 10 2 0 2023-11-18 17:34:17.393718292 +0800 CST m=+11.132866238
+0 {12 true} false 1 12
+[count num] 2 0
+0 {12 true} false 1 12
+[count num] 3 0
+[vote time] 1 12 10 0 0 2023-11-18 17:34:17.393715807 +0800 CST m=+11.132863753
+0 {12 true} false 1 12
+[count num] 4 0
+[election leader] 0
+0 {0 false} false 0 10
+1 {0 false} false 0 12
+4 {0 false} true 2 9
+4 {0 false} true 2 9
+[candidate] 3 11 2023-11-18 17:34:17.515618482 +0800 CST m=+11.254766428
+0 {0 false} true 2 12
+6 {0 false} false 1 11
+[candidate] 6 12 2023-11-18 17:34:17.581382386 +0800 CST m=+11.320530332
+4 {0 false} true 2 9
+1 {0 false} false 0 12
+5 {0 false} false 0 12
+0 {0 false} true 2 12
+[candidate] 3 12 2023-11-18 17:34:17.686252096 +0800 CST m=+11.425400052
+6 {0 false} false 1 12
+3 {0 false} false 1 12
+4 {0 false} true 2 9
+[candidate] 6 13 2023-11-18 17:34:17.758119402 +0800 CST m=+11.497267348
+0 {0 false} false 0 10
+3 {0 false} false 0 12
+5 {0 false} false 0 12
+1 {0 false} false 0 12
+2 {0 false} true 2 10
+4 {0 false} true 2 9
+0 {0 false} false 0 13
+[candidate] 2 13 2023-11-18 17:34:17.971397911 +0800 CST m=+11.710545858
+[candidate] 1 13 2023-11-18 17:34:17.980613151 +0800 CST m=+11.719761107
+[candidate] 6 14 2023-11-18 17:34:17.996829025 +0800 CST m=+11.735976971
+[vote time] 5 14 12 0 6 2023-11-18 17:34:17.997005299 +0800 CST m=+11.736153255
+[vote time] 0 14 13 -1 6 2023-11-18 17:34:17.997047409 +0800 CST m=+11.736195365
+6 {14 true} false 1 14
+[count num] 2 6
+[vote time] 3 14 12 3 6 2023-11-18 17:34:17.99709761 +0800 CST m=+11.736245566
+6 {14 true} false 1 14
+[count num] 3 6
+6 {14 true} false 1 14
+[count num] 4 6
+[election leader] 6
+5 {0 false} false 0 14
+5 {0 false} false 0 14
+3 {0 false} false 0 14
+6 {0 false} true 2 14
+0 {0 false} false 0 10
+6 {0 false} true 2 14
+1 {0 false} false 1 13
+[candidate] 1 14 2023-11-18 17:34:18.139490608 +0800 CST m=+11.878638554
+0 {0 false} false 0 14
+[candidate] 2 14 2023-11-18 17:34:18.232943915 +0800 CST m=+11.972091872
+[vote time] 6 14 14 6 2 2023-11-18 17:34:18.233117285 +0800 CST m=+11.972265231
+[vote time] 3 14 14 6 2 2023-11-18 17:34:18.233167701 +0800 CST m=+11.972315657
+[vote time] 5 14 14 6 2 2023-11-18 17:34:18.233175505 +0800 CST m=+11.972323451
+2 {14 false} false 1 14
+2 {14 false} false 1 14
+2 {14 false} false 1 14
+0 {0 false} false 0 14
+0 {0 false} false 0 14
+0 {0 false} false 0 14
+0 {0 false} false 0 14
+0 {0 false} false 0 14
+1 {0 false} false 1 14
+3 {0 false} false 0 14
+6 {0 false} true 2 14
+[candidate] 1 15 2023-11-18 17:34:18.411198347 +0800 CST m=+12.150346303
+5 {0 false} false 0 14
+[candidate] 0 15 2023-11-18 17:34:18.43260261 +0800 CST m=+12.171750556
+0 {0 false} false 1 15
+1 {0 false} false 1 15
+6 {0 false} true 2 14
+1 {0 false} false 1 15
+2 {0 false} true 2 10
+0 {0 false} false 0 10
+1 {0 false} false 1 15
+2 {0 false} false 0 14
+5 {0 false} false 0 14
+[candidate] 0 16 2023-11-18 17:34:18.652252629 +0800 CST m=+12.391400585
+0 {0 false} false 1 16
+[candidate] 1 16 2023-11-18 17:34:18.676967967 +0800 CST m=+12.416115923
+0 {0 false} false 1 16
+3 {0 false} false 0 14
+0 {0 false} false 1 16
+2 {0 false} false 0 14
+1 {0 false} false 1 16
+5 {0 false} false 0 14
+2 {0 false} false 0 14
+1 {0 false} false 1 16
+1 {0 false} false 1 16
+6 {0 false} false 0 16
+0 {0 false} false 1 16
+[candidate] 4 17 2023-11-18 17:34:18.900664168 +0800 CST m=+12.639812124
+[vote time] 6 17 16 -1 4 2023-11-18 17:34:18.900827078 +0800 CST m=+12.639975034
+[vote time] 3 17 14 6 4 2023-11-18 17:34:18.900877994 +0800 CST m=+12.640025950
+[vote time] 0 17 16 0 4 2023-11-18 17:34:18.900892762 +0800 CST m=+12.640040708
+[vote time] 1 17 16 1 4 2023-11-18 17:34:18.900912991 +0800 CST m=+12.640060937
+4 {17 true} false 1 17
+[count num] 2 4
+4 {17 true} false 1 17
+[count num] 3 4
+4 {17 true} false 1 17
+[count num] 4 4
+[election leader] 4
+[vote time] 5 17 14 6 4 2023-11-18 17:34:18.900965821 +0800 CST m=+12.640113767
+4 {17 true} true 2 17
+[count num] 5 4
+[election leader] 4
+4 {17 true} true 2 17
+[count num] 6 4
+[election leader] 4
+[vote time] 2 17 14 2 4 2023-11-18 17:34:18.90083893 +0800 CST m=+12.639986886
+4 {17 true} true 2 17
+[count num] 7 4
+[election leader] 4
+1 {0 false} false 0 17
+5 {0 false} false 0 17
+3 {0 false} false 0 17
+2 {0 false} true 2 10
+2 {0 false} false 0 17
+1 {0 false} false 0 17
+3 {0 false} false 0 17
+4 {0 false} true 2 17
+3 {0 false} false 0 17
+4 {0 false} true 2 17
+1 {0 false} false 0 17
+0 {0 false} false 0 17
+3 {0 false} false 0 17
+  ... Passed --   5.4  7  708  105922    0
+PASS
+ok  	6.5840/raft	13.006s

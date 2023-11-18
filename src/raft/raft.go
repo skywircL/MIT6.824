@@ -23,6 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"fmt"
 
 	//	"6.5840/labgob"
 	"6.5840/labrpc"
@@ -50,6 +51,15 @@ type ApplyMsg struct {
 	SnapshotIndex int
 }
 
+type State int
+
+const   (
+	Follower State = iota
+	Candidate
+	Leader
+)
+
+
 // A Go object implementing a single Raft peer.
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
@@ -58,7 +68,19 @@ type Raft struct {
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
 
+	state  State
+
 	// Your data here (2A, 2B, 2C).
+	IsGetHeartbeat  chan int 
+	currentTerm int  // incr default 0  
+	votedFor int  // 投票给了谁
+	log  []string  // log Entry
+	isleader bool  
+	Ticker  *time.Ticker
+
+
+
+
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
@@ -67,10 +89,16 @@ type Raft struct {
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
+	
 
 	var term int
 	var isleader bool
-	// Your code here (2A).
+	// Your code here (2A). 
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	term = rf.currentTerm 
+	isleader = rf.isleader
+
 	return term, isleader
 }
 
@@ -123,23 +151,146 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 }
 
+type AppendEntriesArgs struct {
+	// Your data here (2A, 2B).
+	Term int 
+	LeaderId int 
+	PrevLogIndex int 
+	PrevLogTerm int 
+	Entries []string  
+	LeaderCommit []string 
+
+}
+
+// example RequestVote RPC reply structure.
+// field names must start with capital letters!
+type AppendEntriesReply struct {
+	// Your data here (2A).
+	Term int    //让leader自我更新 ？ 
+	Success bool 
+
+}
+
+// example RequestVote RPC handler.
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) { //heartbeat timeout implementation 由leader发送
+	// Your code here (2A, 2B).
+	//接收到heartbeat，刷新计时器
+	if rf.killed() {
+		return 
+	}
+	rf.mu.Lock()
+	reply.Success = true 	
+	if args.Term < rf.currentTerm {
+		reply.Success = false
+	} else {
+		rf.IsGetHeartbeat<- 0 
+			rf.isleader = false
+			rf.state = Follower
+			reply.Success = true
+		rf.currentTerm = args.Term
+	
+	}
+	reply.Term = rf.currentTerm
+	rf.mu.Unlock()
+	
+	return 
+}
+
+
+func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	//发给所有的node , 目前来说发心跳，发出去了即可，暂时用不到回复
+	if rf.killed() {
+		return 
+	}
+	for  i ,v:=range rf.peers{
+		if i == rf.me {
+			continue
+		}
+		//心跳也要起协程发
+		go func (v *labrpc.ClientEnd) {
+			ok:=v.Call("Raft.AppendEntries", args, reply)
+			if ok {
+				rf.mu.Lock()
+				defer rf.mu.Unlock()
+				if reply.Term > rf.currentTerm {
+					rf.currentTerm = reply.Term
+					rf.votedFor = -1
+					rf.state = Follower
+					rf.isleader = false
+				}else {
+	
+				}
+			}
+		}(v)
+		
+	}
+	
+}
+
+
+
 
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
+	Term int 
+	CandidateId int 
+	LastLogIndex int
+	LastLogTerm int 
 }
 
 // example RequestVote RPC reply structure.
 // field names must start with capital letters!
 type RequestVoteReply struct {
 	// Your data here (2A).
+	Term int 
+	Votegranted bool 
+
 }
 
-// example RequestVote RPC handler.
-func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
+func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) { //candidate 在选举期间发起
 	// Your code here (2A, 2B).
+	//进行投票 , 同步term，如果candidate的term比自己大
+	//会重置election timeout
+	
+	if rf.killed() {
+		reply.Votegranted = false
+		return 
+	}
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	fmt.Println("[vote time]",rf.me,args.Term , rf.currentTerm,rf.votedFor,args.CandidateId,time.Now())
+	//当出现有多个candidate的情况，怎么根据任期来解决这个问题
+	if args.Term > rf.currentTerm { //什么情况下会有相同的term，同为candidate	
+		rf.IsGetHeartbeat <- 0
+		rf.isleader = false
+		rf.state = Follower
+		rf.currentTerm = args.Term
+		rf.votedFor = args.CandidateId
+		reply.Votegranted = true
+	
+		
+	} else { 
+		if args.Term == rf.currentTerm { //如果是投给的那个人来要票，那就再给他投一次
+			if  (rf.votedFor == args.CandidateId||rf.votedFor == -1) {
+				rf.IsGetHeartbeat <- 0
+				rf.votedFor = args.CandidateId
+				reply.Votegranted = true
+			
+			}
+			
+		} else {
+			reply.Votegranted = false
+		
+		}
+		
+	}
+	
+	reply.Term = rf.currentTerm
+	return 
 }
+
 
 // example code to send a RequestVote RPC to a server.
 // server is the index of the target server in rf.peers[].
@@ -172,7 +323,6 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	return ok
 }
-
 
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
@@ -209,6 +359,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
+	rf.mu.Lock()
+	rf.Ticker.Stop()
+	rf.mu.Unlock()
+
 }
 
 func (rf *Raft) killed() bool {
@@ -221,12 +375,20 @@ func (rf *Raft) ticker() {
 
 		// Your code here (2A)
 		// Check if a leader election should be started.
-
-
+		//在ticker里发心跳
+		if rf.state == Leader {
+			
+			args := &AppendEntriesArgs{Term:rf.currentTerm,LeaderId: rf.me}
+			reply := &AppendEntriesReply{}
+			rf.sendAppendEntries(args ,reply)
+		
+		}
+		
+	
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
-		ms := 50 + (rand.Int63() % 300)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
+		// ms := 50 + (rand.Int63() % 300)
+		time.Sleep(120 * time.Millisecond)
 	}
 }
 
@@ -245,14 +407,94 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.IsGetHeartbeat = make(chan int )
 
 	// Your initialization code here (2A, 2B, 2C).
-
+	rf.isleader = false  
+	rf.state = Follower
+	rf.currentTerm  = 0
+	rf.votedFor  =  -1 
+	Ticker := time.NewTicker(time.Duration(150+rand.Intn(200)) * time.Millisecond)	
+	rf.Ticker = Ticker
+	rf.log = make([]string,0)   
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
+
+	//再启一个gorutine，用于election timeout
+	go func (){
+		
+		for {
+			select{
+				case <-Ticker.C :  //heartbeat timeout 
+					//开始选举
+					
+					rf.Ticker.Reset(time.Duration(150+rand.Intn(200)) * time.Millisecond)	
+					if rf.state == Follower ||rf.state == Candidate {
+						
+						rf.state = Candidate
+						rf.currentTerm = rf.currentTerm + 1
+						args := &RequestVoteArgs{Term:rf.currentTerm,CandidateId:rf.me}
+						
+						//先投自己一票
+						rf.votedFor = me
+						count := 1
+						fmt.Println("[candidate]",rf.me,rf.currentTerm,time.Now())
+						for v:=range rf.peers {
+							if v == rf.me {
+								continue
+							}
+							//启线程异步进行 - -> 对go的rpc不是很熟悉
+							go func (args *RequestVoteArgs,v int,count *int){
+								reply := RequestVoteReply{}
+								var ok bool = false
+								ok=rf.sendRequestVote(v,args,&reply)
+							
+								fmt.Println(rf.me,reply,rf.isleader,rf.state,rf.currentTerm)
+								if ok {
+									rf.mu.Lock()
+									defer rf.mu.Unlock()
+									if reply.Term> rf.currentTerm {
+										
+										rf.currentTerm = reply.Term   //变为follower不需要重置计时器和投票？
+										rf.votedFor = -1
+										rf.state = Follower 	
+								
+								}
+								
+								if reply.Votegranted {
+										*count +=1  
+									
+										fmt.Println("[count num]",*count,rf.me)
+										if *count >len(rf.peers)/2{
+											if rf.currentTerm == args.Term {  //解决延迟票
+												rf.isleader = true
+												rf.state = Leader
+												fmt.Println("[election leader]",rf.me)
+												//发送心跳包，告知已经选上leader
+												args := &AppendEntriesArgs{Term:rf.currentTerm,LeaderId: rf.me}
+												reply := &AppendEntriesReply{}
+												rf.sendAppendEntries(args ,reply)
+											}
+										}
+								}
+							}
+							}(args,v,&count)
+						
+							
+						}
+						
+					}
+				
+										
+				case <-rf.IsGetHeartbeat: //收到心跳
+					rf.Ticker.Reset(time.Duration(150+rand.Intn(200)) * time.Millisecond)	
+			}
+		}
+	}()
+
 
 
 	return rf
