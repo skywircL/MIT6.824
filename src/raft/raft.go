@@ -167,8 +167,9 @@ type AppendEntriesArgs struct {
 // field names must start with capital letters!
 type AppendEntriesReply struct {
 	// Your data here (2A).
-	Term    int //让leader自我更新 ？
-	Success bool
+	Term            int //让leader自我更新 ？
+	Success         bool
+	FastGoBackIndex int //快速回退index
 }
 
 // example RequestVote RPC handler.
@@ -187,25 +188,39 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 	rf.currentTerm = args.Term
 	rf.isleader = false
-	rf.state = Follower
+	rf.state = Follower //  ok ?
 	if len(args.Entries) == 0 {
 		rf.IsGetHeartbeat <- 0
 		reply.Success = true
 		reply.Term = rf.currentTerm
-		if len(rf.log) != 0 && len(rf.log)-1 > args.PrevLogIndex { //这个有什么用 - -> 解决新leader初始化问题
-			fmt.Println("log", rf.log, args.PrevLogIndex)
+		//必须通过提交来比
+
+		if len(rf.log)-1 > args.PrevLogIndex { //没有共识的leader
+			rf.log = rf.log[:args.PrevLogIndex+1]
 			reply.Success = false
+			reply.FastGoBackIndex = len(rf.log)
 			return
 		}
-		if len(rf.log) != 0 && len(rf.log)-1 == args.PrevLogIndex {
-			if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
-				fmt.Println("log2", rf.log, args.PrevLogTerm, rf.log[args.PrevLogIndex].Term)
-				reply.Success = false
-				return
+
+		if len(rf.log)-1 < args.PrevLogIndex { //没有共识的leader
+			reply.Success = false
+			reply.FastGoBackIndex = len(rf.log)
+			return
+		}
+
+		if len(rf.log)-1 == args.PrevLogIndex {
+			if !CheckTermIsFirst(len(rf.log) - 1) {
+				if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+					reply.Success = false
+					rf.log = rf.log[:args.PrevLogIndex]
+					reply.FastGoBackIndex = args.PrevLogIndex
+					return
+				}
 			}
 		}
+
 		fmt.Println("know lastApplied", rf.me, rf.lastApplied, len(rf.log), args.PrevLogIndex)
-		for rf.lastApplied < args.LeaderCommit && len(rf.log) == args.LeaderCommit {
+		for rf.lastApplied < args.LeaderCommit {
 			rf.lastApplied++
 			aMsg := ApplyMsg{
 				CommandValid: true,
@@ -214,40 +229,35 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			}
 			rf.applyCh <- aMsg
 			rf.commitIndex = rf.lastApplied
-
 		}
 
 	} else { //如果不为空，不为心跳消息
 		rf.IsGetHeartbeat <- 0
 		//先看匹不匹配
+		if len(rf.log)-1 > args.PrevLogIndex { //没有共识的leader
+			rf.log = rf.log[:args.PrevLogIndex+1]
+			reply.Success = false
+			reply.FastGoBackIndex = len(rf.log)
+			return
+		}
 
-		if args.PrevLogIndex == -1 { //全部不匹配，全盘接收 (恰好前一个是index是0)
-			reply.Success = true
-			for i := range args.Entries {
-				rf.log = append(rf.log, args.Entries[i])
-			}
+		if len(rf.log)-1 < args.PrevLogIndex { //没有共识的leader
+			reply.Success = false
+			reply.FastGoBackIndex = len(rf.log)
+			return
+		}
 
-		} else {
-			if len(rf.log)-1 < args.PrevLogIndex {
-				reply.Success = false
-			} else if len(rf.log)-1 == args.PrevLogIndex {
-				if rf.log[args.PrevLogIndex].Term == args.PrevLogTerm {
-					reply.Success = true
-
-					for i := range args.Entries {
-						rf.log = append(rf.log, args.Entries[i])
-					}
-
-				} else {
+		if len(rf.log)-1 == args.PrevLogIndex {
+			if !CheckTermIsFirst(len(rf.log) - 1) {
+				if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
 					reply.Success = false
 					rf.log = rf.log[:args.PrevLogIndex]
+					reply.FastGoBackIndex = args.PrevLogIndex
+					return
 				}
-
-			} else { //有没有可能follower的log长度远大于leader? -- > 有这个可能
-				//先全部丢弃
-				rf.log = rf.log[:args.PrevLogIndex]
-				reply.Success = false
 			}
+			reply.Success = true
+			rf.log = append(rf.log, args.Entries...)
 		}
 	}
 	reply.Term = rf.currentTerm
@@ -264,23 +274,22 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 		if i == rf.me {
 			continue
 		}
-		//心跳也要起协程发
 		go func(v *labrpc.ClientEnd, i int, CommitSum *int, args AppendEntriesArgs, reply AppendEntriesReply) {
+			rf.mu.Lock()
 			args.LeaderCommit = rf.commitIndex
-			if len(rf.log) != 0 && rf.nextIndex[i] != len(rf.log) {
-				if rf.nextIndex[i] == 0 {
-					args.Entries = rf.log //nextIndex[i] 是已经存储的长度，即最后一个元素的index加1
-					args.PrevLogIndex = rf.nextIndex[i] - 1
-				} else {
-					args.Entries = rf.log[rf.nextIndex[i]:] //nextIndex[i] 是已经存储的长度，即最后一个元素的index加1
-					args.PrevLogIndex = rf.nextIndex[i] - 1
-					args.PrevLogTerm = rf.log[rf.nextIndex[i]-1].Term
-				}
-			}
-			if len(rf.log) != 0 && rf.nextIndex[i] == len(rf.log) {
-				args.PrevLogIndex = rf.nextIndex[i] - 1
+			args.PrevLogIndex = rf.nextIndex[i] - 1
+			if CheckTermIsFirst(args.PrevLogIndex) {
+				args.PrevLogTerm = 0
+			} else {
 				args.PrevLogTerm = rf.log[rf.nextIndex[i]-1].Term
 			}
+
+			if rf.nextIndex[i] < len(rf.log) {
+				args.Entries = rf.log[rf.nextIndex[i]:]
+			}
+			// 按道理来说的话不应该出现nextIndex要大于log的长度
+			rf.mu.Unlock()
+
 			fmt.Println("Raft.AppendEntries", rf.nextIndex, args, i, rf.log, rf.commitIndex)
 			ok := v.Call("Raft.AppendEntries", &args, &reply)
 			if !ok {
@@ -292,12 +301,12 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 
 				if reply.Success {
 					//关于commit 持久化
-					if len(args.Entries) == 0 { //heartbeat
-						return
-					}
 
-					rf.nextIndex[i] = len(rf.log)
-					*CommitSum++
+					if args.LeaderCommit == rf.commitIndex {
+						*CommitSum++
+					}
+					rf.nextIndex[i] = rf.nextIndex[i] + len(args.Entries)
+					rf.matchIndex[i] = rf.nextIndex[i] - 1
 
 					if *CommitSum >= len(rf.peers)/2+1 { //commit
 						*CommitSum = 0
@@ -322,7 +331,8 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 						rf.isleader = false
 						return
 					}
-					rf.nextIndex[i] = rf.nextIndex[i] - 1
+
+					rf.nextIndex[i] = reply.FastGoBackIndex
 				}
 			}
 		}(v, i, &CommitSum, *args, *reply)
@@ -544,7 +554,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.log = make([]Entries, 0)
 	rf.applyCh = applyCh
 
-	Ticker := time.NewTicker(time.Duration(150+rand.Intn(200)) * time.Millisecond)
+	Ticker := time.NewTicker(time.Duration(150+(rand.Int63()%300)) * time.Millisecond)
 	rf.Ticker = Ticker
 	rf.log = make([]Entries, 0)
 	// initialize from state persisted before a crash
@@ -561,16 +571,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case <-Ticker.C: //heartbeat timeout
 				//开始选举
 
-				rf.Ticker.Reset(time.Duration(150+rand.Intn(200)) * time.Millisecond)
+				rf.Ticker.Reset(time.Duration(150+(rand.Int63()%300)) * time.Millisecond)
 				if rf.state == Follower || rf.state == Candidate {
-
 					rf.state = Candidate
 					rf.currentTerm = rf.currentTerm + 1
 					llIndex := 0
 					llTerm := 0
 					if len(rf.log) == 0 {
 						llIndex = -1
-						llTerm = -1
+						llTerm = 0
 					} else {
 						llIndex = len(rf.log) - 1
 						llTerm = rf.log[len(rf.log)-1].Term
@@ -591,7 +600,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 						if v == rf.me {
 							continue
 						}
-						//启线程异步进行 - -> 对go的rpc不是很熟悉
 						go func(args *RequestVoteArgs, v int, count *int) {
 							reply := RequestVoteReply{}
 							var ok bool = false
@@ -603,36 +611,37 @@ func Make(peers []*labrpc.ClientEnd, me int,
 								defer rf.mu.Unlock()
 								if reply.Term > rf.currentTerm {
 
-									rf.currentTerm = reply.Term //变为follower不需要重置计时器和投票？
+									rf.currentTerm = reply.Term
 									rf.votedFor = -1
 									rf.state = Follower
 
 								}
 
 								if reply.Votegranted {
-									*count += 1
-
+									if rf.currentTerm == args.Term {
+										*count += 1
+									}
 									fmt.Println("[count num]", *count, rf.me)
 									if *count > len(rf.peers)/2 {
-										if rf.currentTerm == args.Term { //解决延迟票
-											rf.isleader = true
-											rf.state = Leader
-											fmt.Println("[election leader]", rf.me)
-											//发送心跳包，告知已经选上leader
-											//重置 log index
-											for i := range rf.nextIndex { //可能会有一点性能问题——> 同一个term中后来的1/2票  就算重置了也有appendEntries进行一致性保证
-												rf.nextIndex[i] = len(rf.log)
-												rf.matchIndex[i] = 0
-											}
-											args := &AppendEntriesArgs{Term: rf.currentTerm,
-												LeaderId:     rf.me,
-												PrevLogIndex: len(rf.log) - 1,
-												PrevLogTerm:  0,
-											}
+										*count = 0
+										rf.isleader = true
+										rf.state = Leader
+										fmt.Println("[election leader]", rf.me)
 
-											reply := &AppendEntriesReply{}
-											rf.sendAppendEntries(args, reply)
+										for i := range rf.nextIndex {
+											rf.nextIndex[i] = len(rf.log)
+											rf.matchIndex[i] = 0
 										}
+
+										args := &AppendEntriesArgs{Term: rf.currentTerm,
+											LeaderId:     rf.me,
+											PrevLogIndex: len(rf.log) - 1,
+											PrevLogTerm:  0,
+										}
+
+										reply := &AppendEntriesReply{}
+										go rf.sendAppendEntries(args, reply)
+
 									}
 								}
 							}
@@ -643,7 +652,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 
 			case <-rf.IsGetHeartbeat: //收到心跳
-				rf.Ticker.Reset(time.Duration(150+rand.Intn(200)) * time.Millisecond)
+				rf.Ticker.Reset(time.Duration(150+(rand.Int63()%300)) * time.Millisecond)
 			}
 		}
 	}()

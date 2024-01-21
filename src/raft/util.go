@@ -11,3 +11,10 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	}
 	return
 }
+
+func CheckTermIsFirst(index int) bool {
+	if index == -1 {
+		return true
+	}
+	return false
+}
