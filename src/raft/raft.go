@@ -213,7 +213,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
 					reply.Success = false
 					rf.log = rf.log[:args.PrevLogIndex]
-					reply.FastGoBackIndex = args.PrevLogIndex
+					reply.FastGoBackIndex = rf.commitIndex
 					return
 				}
 			}
@@ -233,15 +233,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	} else { //如果不为空，不为心跳消息
 		rf.IsGetHeartbeat <- 0
-		//先看匹不匹配
-		if len(rf.log)-1 > args.PrevLogIndex { //没有共识的leader
+		if len(rf.log)-1 > args.PrevLogIndex {
 			rf.log = rf.log[:args.PrevLogIndex+1]
 			reply.Success = false
 			reply.FastGoBackIndex = len(rf.log)
 			return
 		}
 
-		if len(rf.log)-1 < args.PrevLogIndex { //没有共识的leader
+		if len(rf.log)-1 < args.PrevLogIndex {
 			reply.Success = false
 			reply.FastGoBackIndex = len(rf.log)
 			return
@@ -252,7 +251,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
 					reply.Success = false
 					rf.log = rf.log[:args.PrevLogIndex]
-					reply.FastGoBackIndex = args.PrevLogIndex
+					reply.FastGoBackIndex = rf.commitIndex
 					return
 				}
 			}
@@ -281,7 +280,8 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 			if CheckTermIsFirst(args.PrevLogIndex) {
 				args.PrevLogTerm = 0
 			} else {
-				args.PrevLogTerm = rf.log[rf.nextIndex[i]-1].Term
+				fmt.Println("who send: ", rf.me, rf.nextIndex, rf.currentTerm, i)
+				args.PrevLogTerm = rf.log[rf.nextIndex[i]-1].Term // maybe have error in here
 			}
 
 			if rf.nextIndex[i] < len(rf.log) {
@@ -301,6 +301,7 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 
 				if reply.Success {
 					//关于commit 持久化
+					fmt.Println("reply.Success: ", rf.me, i, len(args.Entries), rf.nextIndex[i])
 
 					if args.LeaderCommit == rf.commitIndex {
 						*CommitSum++
@@ -310,7 +311,7 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 
 					if *CommitSum >= len(rf.peers)/2+1 { //commit
 						*CommitSum = 0
-						for rf.lastApplied < len(rf.log) {
+						for rf.lastApplied < rf.nextIndex[i] {
 							rf.lastApplied++
 							aMsg := ApplyMsg{
 								CommandValid: true,
@@ -319,10 +320,11 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 							}
 							rf.applyCh <- aMsg
 							rf.commitIndex = rf.lastApplied
+							rf.nextIndex[rf.me] = rf.commitIndex
 						}
 					}
 
-				} else { //如果对不上日志，那么就重新发logentries?直到对上 还是说等待下一个心跳
+				} else {
 
 					if reply.Term > rf.currentTerm { //如果leader的term小于某个节点，那么会强行提升term与领先一致，变为follower，解决离群节点重恢复term过大的问题
 						rf.currentTerm = reply.Term
@@ -331,7 +333,7 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 						rf.isleader = false
 						return
 					}
-
+					fmt.Println("FastGoBackIndex: ", rf.me, i, reply.FastGoBackIndex, rf.currentTerm, reply.Term, rf.nextIndex)
 					rf.nextIndex[i] = reply.FastGoBackIndex
 				}
 			}
@@ -474,8 +476,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	if isLeader {
 		en := Entries{Term: term, Command: command}
-		rf.log = append(rf.log, en) //新的log会通过心跳传送
-		fmt.Println("[start]", rf.log)
+		rf.log = append(rf.log, en)
+		fmt.Printf("[start]:me: %d,log:%v\n", rf.me, rf.log)
 	} else {
 		return -1, term, isLeader
 	}
@@ -512,18 +514,20 @@ func (rf *Raft) ticker() {
 		// Your code here (2A)
 		// Check if a leader election should be started.
 		//在ticker里发心跳
+		rf.mu.Lock()
 		if rf.state == Leader {
-
 			args := &AppendEntriesArgs{Term: rf.currentTerm, LeaderId: rf.me}
 			reply := &AppendEntriesReply{}
+			rf.mu.Unlock()
 			rf.sendAppendEntries(args, reply)
 
+		} else {
+			rf.mu.Unlock()
 		}
-
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
 		// ms := 50 + (rand.Int63() % 300)
-		time.Sleep(120 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -554,7 +558,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.log = make([]Entries, 0)
 	rf.applyCh = applyCh
 
-	Ticker := time.NewTicker(time.Duration(150+(rand.Int63()%300)) * time.Millisecond)
+	Ticker := time.NewTicker(time.Duration(150+(rand.Int63()%200)) * time.Millisecond)
 	rf.Ticker = Ticker
 	rf.log = make([]Entries, 0)
 	// initialize from state persisted before a crash
@@ -571,7 +575,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case <-Ticker.C: //heartbeat timeout
 				//开始选举
 
-				rf.Ticker.Reset(time.Duration(150+(rand.Int63()%300)) * time.Millisecond)
+				rf.Ticker.Reset(time.Duration(150+(rand.Int63()%200)) * time.Millisecond)
 				if rf.state == Follower || rf.state == Candidate {
 					rf.state = Candidate
 					rf.currentTerm = rf.currentTerm + 1
@@ -652,7 +656,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 
 			case <-rf.IsGetHeartbeat: //收到心跳
-				rf.Ticker.Reset(time.Duration(150+(rand.Int63()%300)) * time.Millisecond)
+				rf.Ticker.Reset(time.Duration(150+(rand.Int63()%200)) * time.Millisecond)
 			}
 		}
 	}()
