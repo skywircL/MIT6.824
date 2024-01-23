@@ -188,21 +188,20 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 	rf.currentTerm = args.Term
 	rf.isleader = false
-	rf.state = Follower //  ok ?
+	rf.state = Follower
 	if len(args.Entries) == 0 {
 		rf.IsGetHeartbeat <- 0
 		reply.Success = true
 		reply.Term = rf.currentTerm
-		//必须通过提交来比
 
-		if len(rf.log)-1 > args.PrevLogIndex { //没有共识的leader
+		if len(rf.log)-1 > args.PrevLogIndex {
 			rf.log = rf.log[:args.PrevLogIndex+1]
 			reply.Success = false
 			reply.FastGoBackIndex = len(rf.log)
 			return
 		}
 
-		if len(rf.log)-1 < args.PrevLogIndex { //没有共识的leader
+		if len(rf.log)-1 < args.PrevLogIndex {
 			reply.Success = false
 			reply.FastGoBackIndex = len(rf.log)
 			return
@@ -212,14 +211,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			if !CheckTermIsFirst(len(rf.log) - 1) {
 				if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
 					reply.Success = false
-					rf.log = rf.log[:args.PrevLogIndex]
+					rf.log = rf.log[:rf.commitIndex]
 					reply.FastGoBackIndex = rf.commitIndex
 					return
 				}
 			}
 		}
 
-		fmt.Println("know lastApplied", rf.me, rf.lastApplied, len(rf.log), args.PrevLogIndex)
+		fmt.Printf("know lastApplied me; %d,lastapp: %d, len: %d,index ;%d ,\n", rf.me, rf.lastApplied, len(rf.log), args.PrevLogIndex)
 		for rf.lastApplied < args.LeaderCommit {
 			rf.lastApplied++
 			aMsg := ApplyMsg{
@@ -250,7 +249,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			if !CheckTermIsFirst(len(rf.log) - 1) {
 				if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
 					reply.Success = false
-					rf.log = rf.log[:args.PrevLogIndex]
+					rf.log = rf.log[:rf.commitIndex]
 					reply.FastGoBackIndex = rf.commitIndex
 					return
 				}
@@ -269,45 +268,55 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 		return
 	}
 	CommitSum := 1
+
 	for i, v := range rf.peers {
 		if i == rf.me {
 			continue
 		}
-		go func(v *labrpc.ClientEnd, i int, CommitSum *int, args AppendEntriesArgs, reply AppendEntriesReply) {
-			rf.mu.Lock()
-			args.LeaderCommit = rf.commitIndex
-			args.PrevLogIndex = rf.nextIndex[i] - 1
-			if CheckTermIsFirst(args.PrevLogIndex) {
-				args.PrevLogTerm = 0
-			} else {
-				fmt.Println("who send: ", rf.me, rf.nextIndex, rf.currentTerm, i)
-				args.PrevLogTerm = rf.log[rf.nextIndex[i]-1].Term // maybe have error in here
-			}
-
-			if rf.nextIndex[i] < len(rf.log) {
-				args.Entries = rf.log[rf.nextIndex[i]:]
-			}
-			// 按道理来说的话不应该出现nextIndex要大于log的长度
+		rf.mu.Lock()
+		if rf.state != Leader {
 			rf.mu.Unlock()
+			break
+		}
 
-			fmt.Println("Raft.AppendEntries", rf.nextIndex, args, i, rf.log, rf.commitIndex)
+		next := rf.nextIndex[i]
+		args.LeaderCommit = rf.commitIndex
+		args.PrevLogIndex = next - 1
+
+		if CheckTermIsFirst(args.PrevLogIndex) {
+			args.Entries = make([]Entries, len(rf.log))
+			args.PrevLogTerm = 0
+		} else {
+			args.Entries = make([]Entries, len(rf.log)-args.PrevLogIndex-1)
+			fmt.Println("who send: ", rf.me, rf.nextIndex, rf.currentTerm, i)
+			args.PrevLogTerm = rf.log[next-1].Term // maybe have error in here
+		}
+		if next < len(rf.log) {
+			copy(args.Entries, rf.log[next:])
+		}
+		rf.mu.Unlock()
+		go func(v *labrpc.ClientEnd, i int, CommitSum *int, args AppendEntriesArgs, reply AppendEntriesReply) {
+			fmt.Println("Raft.AppendEntries", rf.nextIndex, args, i, args.Entries, rf.commitIndex)
 			ok := v.Call("Raft.AppendEntries", &args, &reply)
-			if !ok {
-				ok = v.Call("Raft.AppendEntries", &args, &reply)
-			}
 			if ok {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
 
 				if reply.Success {
 					//关于commit 持久化
-					fmt.Println("reply.Success: ", rf.me, i, len(args.Entries), rf.nextIndex[i])
+					fmt.Println("reply.Success: ", rf.me, i, len(args.Entries), rf.nextIndex)
 
 					if args.LeaderCommit == rf.commitIndex {
 						*CommitSum++
 					}
-					rf.nextIndex[i] = rf.nextIndex[i] + len(args.Entries)
-					rf.matchIndex[i] = rf.nextIndex[i] - 1
+					newNext := args.PrevLogIndex + len(args.Entries) + 1
+					newMatch := args.PrevLogIndex + len(args.Entries)
+					if newNext > rf.nextIndex[i] {
+						rf.nextIndex[i] = newNext
+					}
+					if newMatch > rf.matchIndex[i] {
+						rf.matchIndex[i] = newMatch
+					}
 
 					if *CommitSum >= len(rf.peers)/2+1 { //commit
 						*CommitSum = 0
@@ -326,7 +335,7 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 
 				} else {
 
-					if reply.Term > rf.currentTerm { //如果leader的term小于某个节点，那么会强行提升term与领先一致，变为follower，解决离群节点重恢复term过大的问题
+					if reply.Term > rf.currentTerm {
 						rf.currentTerm = reply.Term
 						rf.votedFor = -1
 						rf.state = Follower
@@ -510,7 +519,6 @@ func (rf *Raft) killed() bool {
 
 func (rf *Raft) ticker() {
 	for rf.killed() == false {
-
 		// Your code here (2A)
 		// Check if a leader election should be started.
 		//在ticker里发心跳
@@ -520,7 +528,6 @@ func (rf *Raft) ticker() {
 			reply := &AppendEntriesReply{}
 			rf.mu.Unlock()
 			rf.sendAppendEntries(args, reply)
-
 		} else {
 			rf.mu.Unlock()
 		}
@@ -558,7 +565,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.log = make([]Entries, 0)
 	rf.applyCh = applyCh
 
-	Ticker := time.NewTicker(time.Duration(150+(rand.Int63()%200)) * time.Millisecond)
+	Ticker := time.NewTicker(time.Duration(250+(rand.Int63()%150)) * time.Millisecond)
 	rf.Ticker = Ticker
 	rf.log = make([]Entries, 0)
 	// initialize from state persisted before a crash
@@ -575,7 +582,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case <-Ticker.C: //heartbeat timeout
 				//开始选举
 
-				rf.Ticker.Reset(time.Duration(150+(rand.Int63()%200)) * time.Millisecond)
+				rf.Ticker.Reset(time.Duration(250+(rand.Int63()%150)) * time.Millisecond)
 				if rf.state == Follower || rf.state == Candidate {
 					rf.state = Candidate
 					rf.currentTerm = rf.currentTerm + 1
@@ -612,7 +619,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 							fmt.Println(rf.me, reply, rf.isleader, rf.state, rf.currentTerm)
 							if ok {
 								rf.mu.Lock()
-								defer rf.mu.Unlock()
+
 								if reply.Term > rf.currentTerm {
 
 									rf.currentTerm = reply.Term
@@ -644,10 +651,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 										}
 
 										reply := &AppendEntriesReply{}
-										go rf.sendAppendEntries(args, reply)
-
+										rf.mu.Unlock()
+										rf.sendAppendEntries(args, reply)
+									} else {
+										rf.mu.Unlock()
 									}
+								} else {
+									rf.mu.Unlock()
 								}
+
 							}
 						}(args, v, &count)
 
@@ -656,7 +668,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 
 			case <-rf.IsGetHeartbeat: //收到心跳
-				rf.Ticker.Reset(time.Duration(150+(rand.Int63()%200)) * time.Millisecond)
+				rf.Ticker.Reset(time.Duration(250+(rand.Int63()%150)) * time.Millisecond)
 			}
 		}
 	}()
