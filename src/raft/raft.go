@@ -18,6 +18,8 @@ package raft
 //
 
 import (
+	"6.5840/labgob"
+	"bytes"
 	"fmt"
 	//	"bytes"
 	"math/rand"
@@ -117,6 +119,13 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// raftstate := w.Bytes()
 	// rf.persister.Save(raftstate, nil)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.log)
+	e.Encode(rf.votedFor)
+	raftstate := w.Bytes()
+	rf.persister.Save(raftstate, nil)
 }
 
 // restore previously persisted state.
@@ -137,6 +146,19 @@ func (rf *Raft) readPersist(data []byte) {
 	//   rf.xxx = xxx
 	//   rf.yyy = yyy
 	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var term int
+	var log []Entries
+	var voteFor int
+	if d.Decode(&term) != nil || d.Decode(&log) != nil || d.Decode(&voteFor) != nil {
+		fmt.Println("read persist err")
+	} else {
+		rf.log = log
+		rf.currentTerm = term
+		rf.votedFor = voteFor
+	}
+
 }
 
 // the service says it has created a snapshot that has
@@ -189,6 +211,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.currentTerm = args.Term
 	rf.isleader = false
 	rf.state = Follower
+	rf.persist()
+
 	if len(args.Entries) == 0 {
 		rf.IsGetHeartbeat <- 0
 		reply.Success = true
@@ -198,6 +222,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = rf.log[:args.PrevLogIndex+1]
 			reply.Success = false
 			reply.FastGoBackIndex = len(rf.log)
+			rf.persist()
 			return
 		}
 
@@ -213,6 +238,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 					reply.Success = false
 					rf.log = rf.log[:rf.commitIndex]
 					reply.FastGoBackIndex = rf.commitIndex
+					rf.persist()
 					return
 				}
 			}
@@ -235,6 +261,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		if len(rf.log)-1 > args.PrevLogIndex {
 			rf.log = rf.log[:args.PrevLogIndex+1]
 			reply.Success = false
+			rf.persist()
 			reply.FastGoBackIndex = len(rf.log)
 			return
 		}
@@ -251,11 +278,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 					reply.Success = false
 					rf.log = rf.log[:rf.commitIndex]
 					reply.FastGoBackIndex = rf.commitIndex
+					rf.persist()
 					return
 				}
 			}
 			reply.Success = true
 			rf.log = append(rf.log, args.Entries...)
+			rf.persist()
 		}
 	}
 	reply.Term = rf.currentTerm
@@ -267,7 +296,6 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 	if rf.killed() {
 		return
 	}
-	CommitSum := 1
 
 	for i, v := range rf.peers {
 		if i == rf.me {
@@ -295,9 +323,16 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 			copy(args.Entries, rf.log[next:])
 		}
 		rf.mu.Unlock()
-		go func(v *labrpc.ClientEnd, i int, CommitSum *int, args AppendEntriesArgs, reply AppendEntriesReply) {
+		go func(v *labrpc.ClientEnd, i int, args AppendEntriesArgs, reply AppendEntriesReply) {
 			fmt.Println("Raft.AppendEntries", rf.nextIndex, args, i, args.Entries, rf.commitIndex)
 			ok := v.Call("Raft.AppendEntries", &args, &reply)
+			for !ok {
+				if rf.killed() {
+					return
+				}
+				ok = v.Call("Raft.AppendEntries", &args, &reply)
+			}
+
 			if ok {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
@@ -305,10 +340,6 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 				if reply.Success {
 					//关于commit 持久化
 					fmt.Println("reply.Success: ", rf.me, i, len(args.Entries), rf.nextIndex)
-
-					if args.LeaderCommit == rf.commitIndex {
-						*CommitSum++
-					}
 					newNext := args.PrevLogIndex + len(args.Entries) + 1
 					newMatch := args.PrevLogIndex + len(args.Entries)
 					if newNext > rf.nextIndex[i] {
@@ -317,10 +348,27 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 					if newMatch > rf.matchIndex[i] {
 						rf.matchIndex[i] = newMatch
 					}
+					go func() {
+						for end := 0; end < len(rf.log); end++ {
+							if rf.log[end].Term != rf.currentTerm {
+								continue
+							}
+							n := 1
+							for k := range rf.matchIndex {
+								if rf.me != k && rf.matchIndex[k] >= end {
+									n++
+								}
+								if n > len(rf.peers)/2 {
+									rf.commitIndex = end + 1
+									break
+								}
+							}
 
-					if *CommitSum >= len(rf.peers)/2+1 { //commit
-						*CommitSum = 0
-						for rf.lastApplied < rf.nextIndex[i] {
+						}
+
+						//判断提交
+						rf.mu.Lock()
+						for rf.lastApplied < rf.commitIndex {
 							rf.lastApplied++
 							aMsg := ApplyMsg{
 								CommandValid: true,
@@ -328,10 +376,12 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 								CommandIndex: rf.lastApplied,
 							}
 							rf.applyCh <- aMsg
+							fmt.Println("leader commit", aMsg)
 							rf.commitIndex = rf.lastApplied
 							rf.nextIndex[rf.me] = rf.commitIndex
 						}
-					}
+						rf.mu.Unlock()
+					}()
 
 				} else {
 
@@ -340,13 +390,15 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 						rf.votedFor = -1
 						rf.state = Follower
 						rf.isleader = false
+
+						rf.persist()
 						return
 					}
 					fmt.Println("FastGoBackIndex: ", rf.me, i, reply.FastGoBackIndex, rf.currentTerm, reply.Term, rf.nextIndex)
 					rf.nextIndex[i] = reply.FastGoBackIndex
 				}
 			}
-		}(v, i, &CommitSum, *args, *reply)
+		}(v, i, *args, *reply)
 
 	}
 
@@ -372,9 +424,6 @@ type RequestVoteReply struct {
 
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) { //candidate 在选举期间发起
 	// Your code here (2A, 2B).
-	//进行投票 , 同步term，如果candidate的term比自己大
-	//会重置election timeout
-
 	if rf.killed() {
 		reply.Votegranted = false
 		return
@@ -382,14 +431,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) { //
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	//当出现有多个candidate的情况，怎么根据任期来解决这个问题
-	if args.Term > rf.currentTerm { //什么情况下会有相同的term，同为candidate或着接收到vote的follower
+	if args.Term > rf.currentTerm {
 		rf.IsGetHeartbeat <- 0
 		rf.isleader = false
 		rf.state = Follower
 		rf.votedFor = -1
 		rf.currentTerm = args.Term
-		//先看log再投票
 		lv := rf.logVote(args)
 		if lv {
 			rf.votedFor = args.CandidateId
@@ -412,7 +459,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) { //
 		}
 
 	}
-
+	rf.persist()
 	reply.Term = rf.currentTerm
 	return
 }
@@ -486,6 +533,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	if isLeader {
 		en := Entries{Term: term, Command: command}
 		rf.log = append(rf.log, en)
+		rf.persist()
 		fmt.Printf("[start]:me: %d,log:%v\n", rf.me, rf.log)
 	} else {
 		return -1, term, isLeader
@@ -534,7 +582,7 @@ func (rf *Raft) ticker() {
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
 		// ms := 50 + (rand.Int63() % 300)
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -565,7 +613,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.log = make([]Entries, 0)
 	rf.applyCh = applyCh
 
-	Ticker := time.NewTicker(time.Duration(250+(rand.Int63()%200)) * time.Millisecond)
+	Ticker := time.NewTicker(time.Duration(300+(rand.Int63()%150)) * time.Millisecond)
 	rf.Ticker = Ticker
 	rf.log = make([]Entries, 0)
 	// initialize from state persisted before a crash
@@ -581,7 +629,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case <-Ticker.C:
 				//开始选举
 
-				rf.Ticker.Reset(time.Duration(250+(rand.Int63()%200)) * time.Millisecond)
+				rf.Ticker.Reset(time.Duration(300+(rand.Int63()%150)) * time.Millisecond)
 				if rf.state == Follower || rf.state == Candidate {
 					rf.state = Candidate
 					rf.currentTerm = rf.currentTerm + 1
@@ -604,6 +652,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 					//先投自己一票
 					rf.votedFor = me
+					rf.persist()
 					count := 1
 					fmt.Println("[candidate]", rf.me, rf.currentTerm, time.Now())
 					for v := range rf.peers {
@@ -615,7 +664,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 							var ok bool = false
 							ok = rf.sendRequestVote(v, args, &reply)
 
-							fmt.Println(rf.me, reply, rf.isleader, rf.state, rf.currentTerm)
+							fmt.Println("who send vote ", v, reply, rf.isleader, rf.state, rf.currentTerm)
 							if ok {
 								rf.mu.Lock()
 
@@ -624,7 +673,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 									rf.currentTerm = reply.Term
 									rf.votedFor = -1
 									rf.state = Follower
-
+									rf.persist()
 								}
 
 								if reply.Votegranted {
@@ -636,11 +685,12 @@ func Make(peers []*labrpc.ClientEnd, me int,
 										*count = 0
 										rf.isleader = true
 										rf.state = Leader
-										fmt.Println("[election leader]", rf.me)
 
+										rf.persist()
+										fmt.Println("[election leader]", rf.me)
 										for i := range rf.nextIndex {
 											rf.nextIndex[i] = len(rf.log)
-											rf.matchIndex[i] = 0
+											rf.matchIndex[i] = -1
 										}
 
 										args := &AppendEntriesArgs{Term: rf.currentTerm,
@@ -667,7 +717,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 
 			case <-rf.IsGetHeartbeat: //收到心跳
-				rf.Ticker.Reset(time.Duration(250+(rand.Int63()%200)) * time.Millisecond)
+				rf.Ticker.Reset(time.Duration(300+(rand.Int63()%150)) * time.Millisecond)
 			}
 		}
 	}()
