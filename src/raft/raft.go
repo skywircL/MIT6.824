@@ -565,7 +565,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.log = make([]Entries, 0)
 	rf.applyCh = applyCh
 
-	Ticker := time.NewTicker(time.Duration(250+(rand.Int63()%150)) * time.Millisecond)
+	Ticker := time.NewTicker(time.Duration(250+(rand.Int63()%200)) * time.Millisecond)
 	rf.Ticker = Ticker
 	rf.log = make([]Entries, 0)
 	// initialize from state persisted before a crash
@@ -574,15 +574,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// start ticker goroutine to start elections
 	go rf.ticker()
 
-	//再启一个gorutine，用于election timeout
 	go func() {
 
 		for {
 			select {
-			case <-Ticker.C: //heartbeat timeout
+			case <-Ticker.C:
 				//开始选举
 
-				rf.Ticker.Reset(time.Duration(250+(rand.Int63()%150)) * time.Millisecond)
+				rf.Ticker.Reset(time.Duration(250+(rand.Int63()%200)) * time.Millisecond)
 				if rf.state == Follower || rf.state == Candidate {
 					rf.state = Candidate
 					rf.currentTerm = rf.currentTerm + 1
@@ -668,7 +667,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 
 			case <-rf.IsGetHeartbeat: //收到心跳
-				rf.Ticker.Reset(time.Duration(250+(rand.Int63()%150)) * time.Millisecond)
+				rf.Ticker.Reset(time.Duration(250+(rand.Int63()%200)) * time.Millisecond)
 			}
 		}
 	}()
