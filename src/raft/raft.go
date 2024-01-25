@@ -326,13 +326,6 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 		go func(v *labrpc.ClientEnd, i int, args AppendEntriesArgs, reply AppendEntriesReply) {
 			fmt.Println("Raft.AppendEntries", rf.nextIndex, args, i, args.Entries, rf.commitIndex)
 			ok := v.Call("Raft.AppendEntries", &args, &reply)
-			for !ok {
-				if rf.killed() {
-					return
-				}
-				ok = v.Call("Raft.AppendEntries", &args, &reply)
-			}
-
 			if ok {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
@@ -348,40 +341,48 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 					if newMatch > rf.matchIndex[i] {
 						rf.matchIndex[i] = newMatch
 					}
-					go func() {
-						for end := 0; end < len(rf.log); end++ {
-							if rf.log[end].Term != rf.currentTerm {
-								continue
-							}
-							n := 1
-							for k := range rf.matchIndex {
-								if rf.me != k && rf.matchIndex[k] >= end {
-									n++
-								}
-								if n > len(rf.peers)/2 {
-									rf.commitIndex = end + 1
-									break
-								}
-							}
-
+					//for end := 0; end < len(rf.log); end++ {
+					//	if rf.log[end].Term != rf.currentTerm {
+					//		continue
+					//	}
+					//	n := 1
+					//	for k := range rf.matchIndex {
+					//		if rf.me != k && rf.matchIndex[k] >= end {
+					//			n++
+					//		}
+					//		if n > len(rf.peers)/2 {
+					//			rf.commitIndex = end + 1
+					//			break
+					//		}
+					//	}
+					//}
+					for end := len(rf.log) - 1; end >= 0; end-- {
+						if rf.log[end].Term != rf.currentTerm {
+							break
 						}
-
-						//判断提交
-						rf.mu.Lock()
-						for rf.lastApplied < rf.commitIndex {
-							rf.lastApplied++
-							aMsg := ApplyMsg{
-								CommandValid: true,
-								Command:      rf.log[rf.lastApplied-1].Command,
-								CommandIndex: rf.lastApplied,
+						n := 1
+						for k := range rf.matchIndex {
+							if rf.me != k && rf.matchIndex[k] >= end {
+								n++
 							}
-							rf.applyCh <- aMsg
-							fmt.Println("leader commit", aMsg)
-							rf.commitIndex = rf.lastApplied
-							rf.nextIndex[rf.me] = rf.commitIndex
 						}
-						rf.mu.Unlock()
-					}()
+						if n > len(rf.peers)/2 {
+							rf.commitIndex = end + 1
+							break
+						}
+					}
+
+					for rf.lastApplied < rf.commitIndex {
+						rf.lastApplied++
+						aMsg := ApplyMsg{
+							CommandValid: true,
+							Command:      rf.log[rf.lastApplied-1].Command,
+							CommandIndex: rf.lastApplied,
+						}
+						rf.applyCh <- aMsg
+						fmt.Println("leader commit", aMsg)
+						rf.commitIndex = rf.lastApplied
+					}
 
 				} else {
 
@@ -394,7 +395,7 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 						rf.persist()
 						return
 					}
-					fmt.Println("FastGoBackIndex: ", rf.me, i, reply.FastGoBackIndex, rf.currentTerm, reply.Term, rf.nextIndex)
+					DPrintf("FastGoBackIndex: me : %d - > %d ,reply.FastGoBackIndex %d,rf.currentTerm %d,reply.Term %d, rf.nextIndex %v rf.matchindex %v", rf.me, i, reply.FastGoBackIndex, rf.currentTerm, reply.Term, rf.nextIndex, rf.matchIndex)
 					rf.nextIndex[i] = reply.FastGoBackIndex
 				}
 			}
@@ -533,6 +534,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	if isLeader {
 		en := Entries{Term: term, Command: command}
 		rf.log = append(rf.log, en)
+		rf.nextIndex[rf.me] = len(rf.log) + 1
 		rf.persist()
 		fmt.Printf("[start]:me: %d,log:%v\n", rf.me, rf.log)
 	} else {
@@ -582,7 +584,7 @@ func (rf *Raft) ticker() {
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
 		// ms := 50 + (rand.Int63() % 300)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -663,7 +665,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 							reply := RequestVoteReply{}
 							var ok bool = false
 							ok = rf.sendRequestVote(v, args, &reply)
-
 							fmt.Println("who send vote ", v, reply, rf.isleader, rf.state, rf.currentTerm)
 							if ok {
 								rf.mu.Lock()
