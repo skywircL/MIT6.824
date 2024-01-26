@@ -326,10 +326,10 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 		go func(v *labrpc.ClientEnd, i int, args AppendEntriesArgs, reply AppendEntriesReply) {
 			fmt.Println("Raft.AppendEntries", rf.nextIndex, args, i, args.Entries, rf.commitIndex)
 			ok := v.Call("Raft.AppendEntries", &args, &reply)
-			if ok {
-				rf.mu.Lock()
-				defer rf.mu.Unlock()
+			rf.mu.Lock()
+			defer rf.mu.Unlock()
 
+			if ok {
 				if reply.Success {
 					//关于commit 持久化
 					fmt.Println("reply.Success: ", rf.me, i, len(args.Entries), rf.nextIndex)
@@ -386,7 +386,7 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 
 				} else {
 
-					if reply.Term > rf.currentTerm {
+					if reply.Term > args.Term {
 						rf.currentTerm = reply.Term
 						rf.votedFor = -1
 						rf.state = Follower
