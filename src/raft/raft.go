@@ -173,6 +173,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 type Entries struct {
 	Term    int
 	Command interface{} //machine command
+	Index   int
 }
 
 type AppendEntriesArgs struct {
@@ -189,9 +190,10 @@ type AppendEntriesArgs struct {
 // field names must start with capital letters!
 type AppendEntriesReply struct {
 	// Your data here (2A).
-	Term            int //让leader自我更新 ？
+	Term            int
 	Success         bool
 	FastGoBackIndex int //快速回退index
+	FastGoBackTerm  int
 }
 
 // example RequestVote RPC handler.
@@ -212,6 +214,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.isleader = false
 	rf.state = Follower
 	rf.persist()
+	//if args.PrevLogIndex >= len(rf.log) {
+	//	DPrintf("not %d want result\n", rf.me)
+	//	reply.FastGoBackTerm = 0
+	//	reply.Term = rf.currentTerm
+	//	reply.Success = false
+	//	return
+	//}
 
 	if len(args.Entries) == 0 {
 		rf.IsGetHeartbeat <- 0
@@ -219,15 +228,24 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Term = rf.currentTerm
 
 		if len(rf.log)-1 > args.PrevLogIndex {
-			rf.log = rf.log[:args.PrevLogIndex+1]
+			if CheckTermIsFirst(args.PrevLogIndex) {
+				reply.FastGoBackTerm = 0
+				reply.FastGoBackIndex = 0
+			} else {
+				reply.FastGoBackTerm = rf.log[args.PrevLogIndex].Term
+				index := args.PrevLogIndex - 1
+				for index >= 0 && rf.log[index].Term == reply.FastGoBackTerm {
+					index--
+				}
+				reply.FastGoBackIndex = index + 1
+			}
 			reply.Success = false
-			reply.FastGoBackIndex = len(rf.log)
-			rf.persist()
 			return
 		}
 
 		if len(rf.log)-1 < args.PrevLogIndex {
 			reply.Success = false
+			reply.FastGoBackTerm = 0
 			reply.FastGoBackIndex = len(rf.log)
 			return
 		}
@@ -236,15 +254,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			if !CheckTermIsFirst(len(rf.log) - 1) {
 				if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
 					reply.Success = false
-					rf.log = rf.log[:rf.commitIndex]
-					reply.FastGoBackIndex = rf.commitIndex
-					rf.persist()
+					reply.FastGoBackTerm = rf.log[args.PrevLogIndex].Term
+					index := args.PrevLogIndex - 1
+					for index >= 0 && rf.log[index].Term == reply.FastGoBackTerm {
+						index--
+					}
+					reply.FastGoBackIndex = index + 1
 					return
 				}
 			}
 		}
 
-		fmt.Printf("know lastApplied me; %d,lastapp: %d, len: %d,index ;%d ,\n", rf.me, rf.lastApplied, len(rf.log), args.PrevLogIndex)
+		fmt.Printf("know lastApplied me; %d,lastapp: %d, len: %d,index ;%d log: %v\n", rf.me, rf.lastApplied, len(rf.log), args.PrevLogIndex, rf.log)
+
 		for rf.lastApplied < args.LeaderCommit {
 			rf.lastApplied++
 			aMsg := ApplyMsg{
@@ -256,36 +278,54 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.commitIndex = rf.lastApplied
 		}
 
-	} else { //如果不为空，不为心跳消息
+	} else {
 		rf.IsGetHeartbeat <- 0
-		if len(rf.log)-1 > args.PrevLogIndex {
-			rf.log = rf.log[:args.PrevLogIndex+1]
-			reply.Success = false
-			rf.persist()
-			reply.FastGoBackIndex = len(rf.log)
-			return
-		}
+		reply.Term = rf.currentTerm
+		if !rf.CheckPreLogIndex(args) {
+			if len(rf.log)-1 > args.PrevLogIndex {
+				if !CheckTermIsFirst(args.PrevLogIndex) {
+					reply.FastGoBackTerm = rf.log[args.PrevLogIndex].Term
+					index := args.PrevLogIndex - 1
+					for index >= 0 && rf.log[index].Term == reply.FastGoBackTerm {
+						index--
+					}
+					reply.FastGoBackIndex = index + 1
+				}
+				reply.Success = false
+				return
+			}
 
-		if len(rf.log)-1 < args.PrevLogIndex {
-			reply.Success = false
-			reply.FastGoBackIndex = len(rf.log)
-			return
-		}
+			if len(rf.log)-1 < args.PrevLogIndex {
+				reply.Success = false
+				reply.FastGoBackTerm = 0
+				reply.FastGoBackIndex = len(rf.log)
+				return
+			}
 
-		if len(rf.log)-1 == args.PrevLogIndex {
-			if !CheckTermIsFirst(len(rf.log) - 1) {
-				if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
-					reply.Success = false
-					rf.log = rf.log[:rf.commitIndex]
-					reply.FastGoBackIndex = rf.commitIndex
-					rf.persist()
-					return
+			if len(rf.log)-1 == args.PrevLogIndex {
+				if !CheckTermIsFirst(len(rf.log) - 1) {
+					if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+						reply.Success = false
+						reply.FastGoBackTerm = rf.log[args.PrevLogIndex].Term
+						index := args.PrevLogIndex - 1
+						for index >= 0 && rf.log[index].Term == reply.FastGoBackTerm {
+							index--
+						}
+						reply.FastGoBackIndex = index + 1
+						return
+					}
 				}
 			}
-			reply.Success = true
-			rf.log = append(rf.log, args.Entries...)
-			rf.persist()
+
 		}
+		reply.Success = true
+		for index, entry := range args.Entries {
+			if entry.Index >= len(rf.log) || rf.log[entry.Index].Term != entry.Term {
+				rf.log = append(rf.log[:entry.Index], args.Entries[index:]...)
+				break
+			}
+		}
+		rf.persist()
 	}
 	reply.Term = rf.currentTerm
 	return
@@ -328,10 +368,9 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 			ok := v.Call("Raft.AppendEntries", &args, &reply)
 			rf.mu.Lock()
 			defer rf.mu.Unlock()
-
 			if ok {
 				if reply.Success {
-					//关于commit 持久化
+
 					fmt.Println("reply.Success: ", rf.me, i, len(args.Entries), rf.nextIndex)
 					newNext := args.PrevLogIndex + len(args.Entries) + 1
 					newMatch := args.PrevLogIndex + len(args.Entries)
@@ -380,13 +419,15 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 							CommandIndex: rf.lastApplied,
 						}
 						rf.applyCh <- aMsg
-						fmt.Println("leader commit", aMsg)
+						DPrintf("leader commit %v\n", aMsg)
 						rf.commitIndex = rf.lastApplied
 					}
 
 				} else {
-
-					if reply.Term > args.Term {
+					if rf.state != Leader {
+						return
+					}
+					if reply.Term > rf.currentTerm {
 						rf.currentTerm = reply.Term
 						rf.votedFor = -1
 						rf.state = Follower
@@ -394,9 +435,27 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 
 						rf.persist()
 						return
+					} else {
+						if reply.Term == rf.currentTerm {
+							DPrintf("FastGoBackIndex: me : %d - > %d ,reply.FastGoBackIndex %d,reply.FastGoBackTerm %d,rf.currentTerm %d,reply.Term %d, rf.nextIndex %v rf.matchindex %v", rf.me, i, reply.FastGoBackIndex, reply.FastGoBackTerm, rf.currentTerm, reply.Term, rf.nextIndex, rf.matchIndex)
+
+							if reply.Term == 0 {
+								rf.nextIndex[i] = reply.FastGoBackIndex
+							} else {
+								index := reply.FastGoBackIndex
+								if rf.log[index].Term == reply.FastGoBackTerm {
+									for index >= 0 && rf.log[index].Term == reply.FastGoBackTerm {
+										index--
+									}
+									rf.nextIndex[i] = index + 1
+								} else {
+									rf.nextIndex[i] = reply.FastGoBackIndex
+
+								}
+							}
+						}
 					}
-					DPrintf("FastGoBackIndex: me : %d - > %d ,reply.FastGoBackIndex %d,rf.currentTerm %d,reply.Term %d, rf.nextIndex %v rf.matchindex %v", rf.me, i, reply.FastGoBackIndex, rf.currentTerm, reply.Term, rf.nextIndex, rf.matchIndex)
-					rf.nextIndex[i] = reply.FastGoBackIndex
+
 				}
 			}
 		}(v, i, *args, *reply)
@@ -532,7 +591,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := rf.isleader
 
 	if isLeader {
-		en := Entries{Term: term, Command: command}
+		en := Entries{Term: term, Command: command, Index: len(rf.log)}
 		rf.log = append(rf.log, en)
 		rf.nextIndex[rf.me] = len(rf.log) + 1
 		rf.persist()

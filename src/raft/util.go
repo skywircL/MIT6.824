@@ -18,3 +18,13 @@ func CheckTermIsFirst(index int) bool {
 	}
 	return false
 }
+
+func (rf *Raft) CheckPreLogIndex(args *AppendEntriesArgs) bool {
+	if CheckTermIsFirst(args.PrevLogIndex) {
+		return true
+	}
+	if args.PrevLogIndex < len(rf.log) && rf.log[args.PrevLogIndex].Term == args.PrevLogTerm {
+		return true
+	}
+	return false
+}
