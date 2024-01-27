@@ -81,6 +81,7 @@ type Raft struct {
 	matchIndex     []int
 	commitIndex    int
 	lastApplied    int
+	applyCond      *sync.Cond
 
 	applyCh chan ApplyMsg
 	// Look at the paper's Figure 2 for a description of what
@@ -168,6 +169,27 @@ func (rf *Raft) readPersist(data []byte) {
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
 
+}
+
+func (rf *Raft) applier() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	for !rf.killed() {
+		if rf.lastApplied < rf.commitIndex {
+			rf.lastApplied++
+			aMsg := ApplyMsg{
+				CommandValid: true,
+				Command:      rf.log[rf.lastApplied-1].Command,
+				CommandIndex: rf.lastApplied,
+			}
+			DPrintf("%d commit %v\n", rf.me, aMsg)
+			rf.mu.Unlock()
+			rf.applyCh <- aMsg
+			rf.mu.Lock()
+		} else {
+			rf.applyCond.Wait()
+		}
+	}
 }
 
 type Entries struct {
@@ -267,16 +289,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 		fmt.Printf("know lastApplied me; %d,lastapp: %d, len: %d,index ;%d log: %v\n", rf.me, rf.lastApplied, len(rf.log), args.PrevLogIndex, rf.log)
 
-		for rf.lastApplied < args.LeaderCommit {
-			rf.lastApplied++
-			aMsg := ApplyMsg{
-				CommandValid: true,
-				Command:      rf.log[rf.lastApplied-1].Command,
-				CommandIndex: rf.lastApplied,
-			}
-			rf.applyCh <- aMsg
-			rf.commitIndex = rf.lastApplied
+		if args.LeaderCommit > rf.commitIndex {
+			rf.commitIndex = args.LeaderCommit
 		}
+		rf.applyCond.Broadcast()
 
 	} else {
 		rf.IsGetHeartbeat <- 0
@@ -410,19 +426,18 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 							break
 						}
 					}
-
-					for rf.lastApplied < rf.commitIndex {
-						rf.lastApplied++
-						aMsg := ApplyMsg{
-							CommandValid: true,
-							Command:      rf.log[rf.lastApplied-1].Command,
-							CommandIndex: rf.lastApplied,
-						}
-						rf.applyCh <- aMsg
-						DPrintf("leader commit %v\n", aMsg)
-						rf.commitIndex = rf.lastApplied
-					}
-
+					//for rf.lastApplied < rf.commitIndex {
+					//	rf.lastApplied++
+					//	aMsg := ApplyMsg{
+					//		CommandValid: true,
+					//		Command:      rf.log[rf.lastApplied-1].Command,
+					//		CommandIndex: rf.lastApplied,
+					//	}
+					//	rf.applyCh <- aMsg
+					//	DPrintf("leader commit %v\n", aMsg)
+					//	rf.commitIndex = rf.lastApplied
+					//}
+					rf.applyCond.Broadcast()
 				} else {
 					if rf.state != Leader {
 						return
@@ -673,6 +688,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.matchIndex = make([]int, len(rf.peers))
 	rf.log = make([]Entries, 0)
 	rf.applyCh = applyCh
+	rf.applyCond = sync.NewCond(&rf.mu)
 
 	Ticker := time.NewTicker(time.Duration(300+(rand.Int63()%150)) * time.Millisecond)
 	rf.Ticker = Ticker
@@ -682,6 +698,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
+
+	go rf.applier()
 
 	go func() {
 
