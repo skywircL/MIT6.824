@@ -12,7 +12,7 @@
 
 - - [x] lab2D
 
-  [通关MIT6.5840(6.824)Lab2 Raft的正确姿势](./docs/通关MIT6.5840(6.824)Lab2 Raft的正确姿势)
+  [通关MIT6.5840(6.824)Lab2 Raft的正确姿势](./docs/通关MIT6.5840(6.824)Lab2%20Raft的正确姿势.md)
 
 - [ ] lab3
 

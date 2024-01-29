@@ -10,7 +10,7 @@ GitHub仓库：[MadFrey/MIT6.824 (github.com)](https://github.com/MadFrey/MIT6.8
 
 最后一起连续测试400次无错误，注意一下测试时同时并发测试的-p参数不要调太高，50-100之间都可以
 
-![截屏2024-01-29 16.19.43](./assets/截屏2024-01-29 16.19.43.png)
+![](https://cdn.jsdelivr.net/gh/MadFrey/homework.img/%E6%88%AA%E5%B1%8F2024-01-29%2016.19.43.png)
 
 ## 开始前的准备
 
