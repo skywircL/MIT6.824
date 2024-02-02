@@ -252,7 +252,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	go func() {
 		rf.applyCh <- ApplyMsg{
-			SnapshotValid: true,
+			SnapshotValid: false,
 			Snapshot:      args.Data,
 			SnapshotTerm:  args.LastIncludeTerm,
 			SnapshotIndex: args.LastIncludeIndex + 1,
@@ -418,7 +418,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			}
 		}
 
-		fmt.Printf("know lastApplied me; %d,lastapp: %d, len: %d,index ;%d log: %v\n", rf.me, rf.lastApplied, len(rf.log), args.PrevLogIndex, rf.log)
+		DPrintf("know lastApplied me; %d,lastapp: %d, len: %d,index ;%d log: %v\n", rf.me, rf.lastApplied, len(rf.log), args.PrevLogIndex, rf.log)
 
 		if args.LeaderCommit > rf.commitIndex {
 			rf.commitIndex = args.LeaderCommit
@@ -518,14 +518,14 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 		}
 		rf.mu.Unlock()
 		go func(v *labrpc.ClientEnd, i int, args AppendEntriesArgs, reply AppendEntriesReply) {
-			fmt.Println("Raft.AppendEntries", rf.nextIndex, args, i, args.Entries, rf.commitIndex)
+			DPrintf("Raft.AppendEntries %d, %v,%v,%v,%v", rf.nextIndex, args, i, args.Entries, rf.commitIndex)
 			ok := v.Call("Raft.AppendEntries", &args, &reply)
 			rf.mu.Lock()
 			defer rf.mu.Unlock()
 			if ok {
 				if reply.Success {
 
-					fmt.Println("reply.Success: ", rf.me, i, len(args.Entries), rf.nextIndex)
+					DPrintf("reply.Success: %d,%d,%d,%v", rf.me, i, len(args.Entries), rf.nextIndex)
 					newNext := args.PrevLogIndex + len(args.Entries) + 1
 					newMatch := args.PrevLogIndex + len(args.Entries)
 					if newNext > rf.nextIndex[i] {
@@ -732,10 +732,17 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.log = append(rf.log, en)
 		rf.nextIndex[rf.me] = len(rf.log) + rf.lastIncludedIndex + 1
 		rf.persist()
-		fmt.Printf("[start]:me: %d,log:%v\n", rf.me, rf.log)
+		DPrintf("[start]:me: %d,log:%v\n", rf.me, rf.log)
 	} else {
 		return -1, term, isLeader
 	}
+	args := &AppendEntriesArgs{
+		Term:     rf.currentTerm,
+		LeaderId: rf.me,
+	}
+
+	reply := &AppendEntriesReply{}
+	go rf.sendAppendEntries(args, reply)
 
 	return rf.GetAllLogLen(), term, isLeader
 }

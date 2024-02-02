@@ -7,9 +7,10 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
-const Debug = false
+const Debug = true
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug {
@@ -18,11 +19,15 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Key      string
+	Value    string
+	Option   string
+	ClientId int64
+	OptionId int
 }
 
 type KVServer struct {
@@ -33,17 +38,91 @@ type KVServer struct {
 	dead    int32 // set by Kill()
 
 	maxraftstate int // snapshot if log grows this big
-
 	// Your definitions here.
+	kvMap        map[string]string //维护一个kvMap
+	lastOptionId map[int64]int
+	executeChan  map[int]chan Op
 }
 
-
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
+	if kv.killed() {
+		reply.Err = ErrWrongLeader
+		return
+	}
+
 	// Your code here.
+	op := Op{Key: args.Key, Option: "Get", ClientId: args.ClientId, OptionId: args.OptionId}
+	index, _, isLeader := kv.rf.Start(op)
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		return
+	}
+	//阻塞等待 - - 要设置超时时间
+	ch := kv.GetChan(index)
+	select {
+	case result := <-ch:
+		if result.OptionId != args.OptionId || result.ClientId != args.ClientId {
+			reply.Err = ErrWrongLeader
+		} else {
+			reply.Err = OK
+		}
+		kv.mu.Lock()
+		_, ok := kv.kvMap[args.Key]
+		if !ok {
+			reply.Value = ErrNoKey
+		} else {
+			reply.Value = kv.kvMap[args.Key]
+		}
+		kv.mu.Unlock()
+		DPrintf("Key= %s Get value = %s\n", args.Key, reply.Value)
+	case <-time.After(100 * time.Millisecond):
+		DPrintf("Get Timeout\n")
+		reply.Err = ErrTimeOut
+	}
+	go func() {
+		kv.mu.Lock()
+		delete(kv.executeChan, index)
+		kv.mu.Unlock()
+	}()
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	if kv.killed() {
+		reply.Err = ErrWrongLeader
+		return
+	}
+
+	op := Op{Key: args.Key, Option: args.Op, ClientId: args.ClientId, OptionId: args.OptionId, Value: args.Value}
+	index, _, isLeader := kv.rf.Start(op)
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		return
+	}
+
+	ch := kv.GetChan(index)
+	select {
+	case result := <-ch:
+		if result.OptionId != args.OptionId || result.ClientId != args.ClientId {
+			DPrintf("ErrWrongLeader: result.OptionId =%d args.OptionId=%d result.ClientId=%d  args.ClientId=%d\n", result.OptionId, args.OptionId, result.ClientId, args.ClientId)
+			reply.Err = ErrWrongLeader
+		} else {
+			reply.Err = OK
+
+		}
+		//DPrintf("PutAppend kvMap = %v,replyErr = %v\n", kv.kvMap, reply.Err)
+
+	case <-time.After(100 * time.Millisecond):
+		DPrintf("PutAppend Timeout\n")
+		reply.Err = ErrTimeOut
+	}
+	go func() {
+		kv.mu.Lock()
+		DPrintf("%d delet chan: %d\n", kv.me, index)
+		delete(kv.executeChan, index)
+		kv.mu.Unlock()
+	}()
+
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -92,6 +171,60 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
+	kv.kvMap = make(map[string]string)
+	kv.executeChan = make(map[int]chan Op)
+	kv.lastOptionId = make(map[int64]int)
+	go kv.applier()
 
 	return kv
+}
+
+func (kv *KVServer) applier() {
+	for !kv.killed() {
+		select {
+		case msg := <-kv.applyCh:
+
+			command := msg.Command.(Op)
+			kv.mu.Lock()
+			DPrintf("%d server applyCh msg = %v\n", kv.me, msg)
+			if !kv.IsDuplicateRequest(command.ClientId, command.OptionId) {
+
+				switch command.Option {
+				case "Append":
+					kv.kvMap[command.Key] += command.Value
+
+				case "Put":
+					kv.kvMap[command.Key] = command.Value
+				}
+
+				kv.lastOptionId[command.ClientId] = command.OptionId
+
+			}
+			kv.mu.Unlock()
+			kv.GetChan(msg.CommandIndex) <- command
+
+		}
+
+	}
+}
+
+func (kv *KVServer) GetChan(index int) chan Op {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	ch, ok := kv.executeChan[index]
+	if !ok {
+		kv.executeChan[index] = make(chan Op, 1)
+		ch = kv.executeChan[index]
+	}
+	log.Println("create chan index", index)
+	return ch
+}
+
+func (kv *KVServer) IsDuplicateRequest(clientId int64, OptionId int) bool {
+
+	_, ok := kv.lastOptionId[clientId]
+	if ok {
+		return OptionId <= kv.lastOptionId[clientId]
+	}
+	return ok
 }
