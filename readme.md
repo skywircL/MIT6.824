@@ -16,7 +16,7 @@
 
 - [ ] lab3
 
-- - [ ] lab3A
+- - [x] lab3A
 
 - - [ ] lab3B
 

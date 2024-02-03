@@ -58,23 +58,19 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		return
 	}
 	//阻塞等待 - - 要设置超时时间
+	kv.mu.Lock()
 	ch := kv.GetChan(index)
+	kv.mu.Unlock()
 	select {
 	case result := <-ch:
 		if result.OptionId != args.OptionId || result.ClientId != args.ClientId {
 			reply.Err = ErrWrongLeader
 		} else {
+			reply.Value = result.Value
+			DPrintf("Key= %s Get value = %s\n", args.Key, result.Value)
 			reply.Err = OK
 		}
-		kv.mu.Lock()
-		_, ok := kv.kvMap[args.Key]
-		if !ok {
-			reply.Value = ErrNoKey
-		} else {
-			reply.Value = kv.kvMap[args.Key]
-		}
-		kv.mu.Unlock()
-		DPrintf("Key= %s Get value = %s\n", args.Key, reply.Value)
+
 	case <-time.After(100 * time.Millisecond):
 		DPrintf("Get Timeout\n")
 		reply.Err = ErrTimeOut
@@ -99,8 +95,9 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		reply.Err = ErrWrongLeader
 		return
 	}
-
+	kv.mu.Lock()
 	ch := kv.GetChan(index)
+	kv.mu.Unlock()
 	select {
 	case result := <-ch:
 		if result.OptionId != args.OptionId || result.ClientId != args.ClientId {
@@ -187,9 +184,10 @@ func (kv *KVServer) applier() {
 			command := msg.Command.(Op)
 			kv.mu.Lock()
 			DPrintf("%d server applyCh msg = %v\n", kv.me, msg)
-			if !kv.IsDuplicateRequest(command.ClientId, command.OptionId) {
+			if command.Option != "Get" && !kv.IsDuplicateRequest(command.ClientId, command.OptionId) {
 
 				switch command.Option {
+
 				case "Append":
 					kv.kvMap[command.Key] += command.Value
 
@@ -198,10 +196,13 @@ func (kv *KVServer) applier() {
 				}
 
 				kv.lastOptionId[command.ClientId] = command.OptionId
-
 			}
-			kv.mu.Unlock()
+			if command.Option == "Get" {
+				command.Value = kv.kvMap[command.Key]
+				DPrintf("%d server applyCh msg = %v, value = %v\n", kv.me, msg, command.Value)
+			}
 			kv.GetChan(msg.CommandIndex) <- command
+			kv.mu.Unlock()
 
 		}
 
@@ -209,8 +210,7 @@ func (kv *KVServer) applier() {
 }
 
 func (kv *KVServer) GetChan(index int) chan Op {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
+
 	ch, ok := kv.executeChan[index]
 	if !ok {
 		kv.executeChan[index] = make(chan Op, 1)
