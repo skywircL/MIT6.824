@@ -4,6 +4,8 @@ import (
 	"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/raft"
+	"bytes"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -39,9 +41,10 @@ type KVServer struct {
 
 	maxraftstate int // snapshot if log grows this big
 	// Your definitions here.
-	kvMap        map[string]string //维护一个kvMap
-	lastOptionId map[int64]int
-	executeChan  map[int]chan Op
+	kvMap            map[string]string //维护一个kvMap
+	lastOptionId     map[int64]int
+	executeChan      map[int]chan Op
+	lastIncludeIndex int
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
@@ -171,6 +174,10 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.kvMap = make(map[string]string)
 	kv.executeChan = make(map[int]chan Op)
 	kv.lastOptionId = make(map[int64]int)
+	kv.lastIncludeIndex = -1
+	snapshot := persister.ReadSnapshot()
+	kv.ReadSnapshot(snapshot)
+
 	go kv.applier()
 
 	return kv
@@ -180,29 +187,49 @@ func (kv *KVServer) applier() {
 	for !kv.killed() {
 		select {
 		case msg := <-kv.applyCh:
+			if msg.CommandValid {
+				if msg.CommandIndex <= kv.lastIncludeIndex {
+					continue
+				}
+				kv.lastIncludeIndex = msg.CommandIndex
+				command := msg.Command.(Op)
+				kv.mu.Lock()
+				DPrintf("%d server applyCh msg = %v\n", kv.me, msg)
+				if command.Option != "Get" && !kv.IsDuplicateRequest(command.ClientId, command.OptionId) {
 
-			command := msg.Command.(Op)
-			kv.mu.Lock()
-			DPrintf("%d server applyCh msg = %v\n", kv.me, msg)
-			if command.Option != "Get" && !kv.IsDuplicateRequest(command.ClientId, command.OptionId) {
+					switch command.Option {
 
-				switch command.Option {
+					case "Append":
+						kv.kvMap[command.Key] += command.Value
 
-				case "Append":
-					kv.kvMap[command.Key] += command.Value
+					case "Put":
+						kv.kvMap[command.Key] = command.Value
+					}
 
-				case "Put":
-					kv.kvMap[command.Key] = command.Value
+					kv.lastOptionId[command.ClientId] = command.OptionId
+				}
+				if command.Option == "Get" {
+					command.Value = kv.kvMap[command.Key]
+					DPrintf("%d server applyCh msg = %v, value = %v\n", kv.me, msg, command.Value)
 				}
 
-				kv.lastOptionId[command.ClientId] = command.OptionId
+				kv.GetChan(msg.CommandIndex) <- command
+				if kv.maxraftstate != -1 && kv.rf.RaftStateSize() > kv.maxraftstate {
+					DPrintf("%d server PersistSnapshot, index = %v\n", kv.me, msg.CommandIndex)
+					snapshot := kv.PersistSnapshot()
+					kv.rf.Snapshot(msg.CommandIndex, snapshot)
+				}
+				kv.mu.Unlock()
 			}
-			if command.Option == "Get" {
-				command.Value = kv.kvMap[command.Key]
-				DPrintf("%d server applyCh msg = %v, value = %v\n", kv.me, msg, command.Value)
+
+			if msg.SnapshotValid {
+				kv.mu.Lock()
+
+				kv.ReadSnapshot(msg.Snapshot)
+				kv.lastIncludeIndex = msg.SnapshotIndex
+
+				kv.mu.Unlock()
 			}
-			kv.GetChan(msg.CommandIndex) <- command
-			kv.mu.Unlock()
 
 		}
 
@@ -227,4 +254,33 @@ func (kv *KVServer) IsDuplicateRequest(clientId int64, OptionId int) bool {
 		return OptionId <= kv.lastOptionId[clientId]
 	}
 	return ok
+}
+
+func (kv *KVServer) PersistSnapshot() []byte {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(kv.kvMap)
+	e.Encode(kv.lastOptionId)
+	e.Encode(kv.lastIncludeIndex)
+	SnapshotBytes := w.Bytes()
+	return SnapshotBytes
+}
+
+func (kv *KVServer) ReadSnapshot(data []byte) {
+
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+
+	var kvMap map[string]string
+	var lastOptionId map[int64]int
+	var lastIncludeIndex int
+	if d.Decode(&kvMap) != nil || d.Decode(&lastOptionId) != nil || d.Decode(&lastIncludeIndex) != nil {
+		fmt.Println("read persist err")
+	} else {
+		kv.kvMap = kvMap
+		kv.lastOptionId = lastOptionId
+		kv.lastIncludeIndex = lastIncludeIndex
+	}
 }

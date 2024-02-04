@@ -92,6 +92,11 @@ type Raft struct {
 
 }
 
+func (rf *Raft) RaftStateSize() int {
+
+	return rf.persister.RaftStateSize()
+}
+
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
@@ -186,7 +191,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 		rf.lastIncludedIndex = index - 1
 		rf.lastIncludedTerm = rf.log[index-firstIndex-1].Term
 		rf.log = append(sLogs, rf.log[index-firstIndex:]...)
-		DPrintf("[snapshot]: rf.log: %v\n", rf.log)
+		DPrintf("%d [snapshot]: rf.log: %v\n", rf.me, rf.log)
 		w := new(bytes.Buffer)
 		e := labgob.NewEncoder(w)
 		e.Encode(rf.currentTerm)
@@ -235,6 +240,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.log = tempLog
 	} else {
 		tempLog := make([]Entries, 0)
+		DPrintf("install snapshot append lastindex %d,rf.lastindex %d\n", args.LastIncludeIndex, rf.lastIncludedIndex)
 		rf.log = append(tempLog, rf.log[args.LastIncludeIndex-rf.lastIncludedIndex:]...)
 	}
 	rf.lastIncludedTerm = args.LastIncludeTerm
@@ -252,7 +258,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	go func() {
 		rf.applyCh <- ApplyMsg{
-			SnapshotValid: false,
+			SnapshotValid: true,
 			Snapshot:      args.Data,
 			SnapshotTerm:  args.LastIncludeTerm,
 			SnapshotIndex: args.LastIncludeIndex + 1,
@@ -380,6 +386,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Term = rf.currentTerm
 
 		curIndex := len(rf.log) + rf.lastIncludedIndex
+		if rf.lastIncludedIndex > args.PrevLogIndex {
+			reply.Success = false
+			reply.FastGoBackIndex = rf.GetLastIndex() + 1
+			return
+		}
 		if curIndex > args.PrevLogIndex {
 			if rf.CheckTermIsFirst(args.PrevLogIndex) {
 				reply.FastGoBackTerm = 0
@@ -399,7 +410,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		if curIndex < args.PrevLogIndex {
 			reply.Success = false
 			reply.FastGoBackTerm = 0
-			reply.FastGoBackIndex = curIndex + 1
+			reply.FastGoBackIndex = curIndex
 			return
 		}
 
@@ -430,8 +441,15 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Term = rf.currentTerm
 		if !rf.CheckPreLogIndex(args) {
 			curIndex := len(rf.log) + rf.lastIncludedIndex
+			if rf.lastIncludedIndex > args.PrevLogIndex {
+				reply.Success = false
+				reply.FastGoBackIndex = rf.GetLastIndex() + 1
+				return
+			}
+
 			if curIndex > args.PrevLogIndex {
 				if !rf.CheckTermIsFirst(args.PrevLogIndex) {
+					DPrintf("%d get args.PrevLogIndex= %d,rf.lastIncludedIndex= %d\n", rf.me, args.PrevLogIndex, rf.lastIncludedIndex)
 					reply.FastGoBackTerm = rf.log[args.PrevLogIndex-rf.lastIncludedIndex-1].Term
 					index := args.PrevLogIndex - 1
 					for index >= rf.GetFirstIndex() && rf.log[index-rf.lastIncludedIndex-1].Term == reply.FastGoBackTerm {
@@ -446,7 +464,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			if curIndex < args.PrevLogIndex {
 				reply.Success = false
 				reply.FastGoBackTerm = 0
-				reply.FastGoBackIndex = curIndex + 1
+				reply.FastGoBackIndex = curIndex
 				return
 			}
 
@@ -474,6 +492,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			}
 		}
 		rf.persist()
+		if args.LeaderCommit > rf.commitIndex {
+			rf.commitIndex = args.LeaderCommit
+		}
+		rf.applyCond.Broadcast()
 	}
 	reply.Term = rf.currentTerm
 	return
@@ -525,7 +547,7 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 			if ok {
 				if reply.Success {
 
-					DPrintf("reply.Success: %d,%d,%d,%v", rf.me, i, len(args.Entries), rf.nextIndex)
+					DPrintf("reply.Success: %d send to %d,len:%d,nextindex = %v", rf.me, i, len(args.Entries), rf.nextIndex)
 					newNext := args.PrevLogIndex + len(args.Entries) + 1
 					newMatch := args.PrevLogIndex + len(args.Entries)
 					if newNext > rf.nextIndex[i] {
@@ -579,7 +601,7 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 									rf.nextIndex[i] = index
 								}
 								firstIndex := rf.GetFirstIndex()
-								if index >= firstIndex && rf.log[index-rf.lastIncludedIndex-1].Term == reply.FastGoBackTerm {
+								if index >= firstIndex && index < rf.GetAllLogLen() && rf.log[index-rf.lastIncludedIndex-1].Term == reply.FastGoBackTerm {
 									for index >= firstIndex && rf.log[index-rf.lastIncludedIndex-1].Term == reply.FastGoBackTerm {
 										index--
 									}
