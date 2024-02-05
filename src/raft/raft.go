@@ -290,6 +290,7 @@ func (rf *Raft) SendInstallSnapshot(i int) {
 			rf.isleader = false
 			rf.state = Follower // 重置选举时间?
 			rf.persist()
+			return
 		}
 		newNext := args.LastIncludeIndex + 1
 		newMatch := args.LastIncludeIndex
@@ -388,7 +389,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		curIndex := len(rf.log) + rf.lastIncludedIndex
 		if rf.lastIncludedIndex > args.PrevLogIndex {
 			reply.Success = false
-			reply.FastGoBackIndex = rf.GetLastIndex() + 1
+			reply.FastGoBackIndex = rf.lastIncludedIndex + 1
 			return
 		}
 		if curIndex > args.PrevLogIndex {
@@ -443,7 +444,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			curIndex := len(rf.log) + rf.lastIncludedIndex
 			if rf.lastIncludedIndex > args.PrevLogIndex {
 				reply.Success = false
-				reply.FastGoBackIndex = rf.GetLastIndex() + 1
+				reply.FastGoBackIndex = rf.lastIncludedIndex + 1
 				return
 			}
 
@@ -540,7 +541,7 @@ func (rf *Raft) sendAppendEntries(args *AppendEntriesArgs, reply *AppendEntriesR
 		}
 		rf.mu.Unlock()
 		go func(v *labrpc.ClientEnd, i int, args AppendEntriesArgs, reply AppendEntriesReply) {
-			DPrintf("Raft.AppendEntries %d, %v,%v,%v,%v", rf.nextIndex, args, i, args.Entries, rf.commitIndex)
+			//DPrintf("Raft.AppendEntries %d, %v,%v,%v,%v", rf.nextIndex, args, i, args.Entries, rf.commitIndex)
 			ok := v.Call("Raft.AppendEntries", &args, &reply)
 			rf.mu.Lock()
 			defer rf.mu.Unlock()

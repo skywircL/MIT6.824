@@ -213,11 +213,12 @@ func (kv *KVServer) applier() {
 					DPrintf("%d server applyCh msg = %v, value = %v\n", kv.me, msg, command.Value)
 				}
 
-				kv.GetChan(msg.CommandIndex) <- command
-				if kv.maxraftstate != -1 && kv.rf.RaftStateSize() > kv.maxraftstate {
+				if _, isLeader := kv.rf.GetState(); isLeader {
+					kv.GetChan(msg.CommandIndex) <- command
+				}
+				if kv.maxraftstate != -1 && kv.rf.RaftStateSize() >= kv.maxraftstate {
 					DPrintf("%d server PersistSnapshot, index = %v\n", kv.me, msg.CommandIndex)
-					snapshot := kv.PersistSnapshot()
-					kv.rf.Snapshot(msg.CommandIndex, snapshot)
+					kv.rf.Snapshot(msg.CommandIndex, kv.PersistSnapshot())
 				}
 				kv.mu.Unlock()
 			}
@@ -261,13 +262,14 @@ func (kv *KVServer) PersistSnapshot() []byte {
 	e := labgob.NewEncoder(w)
 	e.Encode(kv.kvMap)
 	e.Encode(kv.lastOptionId)
-	e.Encode(kv.lastIncludeIndex)
 	SnapshotBytes := w.Bytes()
 	return SnapshotBytes
 }
 
 func (kv *KVServer) ReadSnapshot(data []byte) {
-
+	if data == nil || len(data) < 1 {
+		return
+	}
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	r := bytes.NewBuffer(data)
@@ -275,12 +277,10 @@ func (kv *KVServer) ReadSnapshot(data []byte) {
 
 	var kvMap map[string]string
 	var lastOptionId map[int64]int
-	var lastIncludeIndex int
-	if d.Decode(&kvMap) != nil || d.Decode(&lastOptionId) != nil || d.Decode(&lastIncludeIndex) != nil {
+	if d.Decode(&kvMap) != nil || d.Decode(&lastOptionId) != nil {
 		fmt.Println("read persist err")
 	} else {
 		kv.kvMap = kvMap
 		kv.lastOptionId = lastOptionId
-		kv.lastIncludeIndex = lastIncludeIndex
 	}
 }
