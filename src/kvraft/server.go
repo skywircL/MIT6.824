@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const Debug = true
+const Debug = false
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug {
@@ -93,6 +93,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	}
 
 	op := Op{Key: args.Key, Option: args.Op, ClientId: args.ClientId, OptionId: args.OptionId, Value: args.Value}
+
 	index, _, isLeader := kv.rf.Start(op)
 	if !isLeader {
 		reply.Err = ErrWrongLeader
@@ -176,8 +177,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.lastOptionId = make(map[int64]int)
 	kv.lastIncludeIndex = -1
 	snapshot := persister.ReadSnapshot()
+	kv.mu.Lock()
 	kv.ReadSnapshot(snapshot)
-
+	kv.mu.Unlock()
 	go kv.applier()
 
 	return kv
@@ -188,12 +190,13 @@ func (kv *KVServer) applier() {
 		select {
 		case msg := <-kv.applyCh:
 			if msg.CommandValid {
+				kv.mu.Lock()
 				if msg.CommandIndex <= kv.lastIncludeIndex {
+					kv.mu.Unlock()
 					continue
 				}
 				kv.lastIncludeIndex = msg.CommandIndex
 				command := msg.Command.(Op)
-				kv.mu.Lock()
 				DPrintf("%d server applyCh msg = %v\n", kv.me, msg)
 				if command.Option != "Get" && !kv.IsDuplicateRequest(command.ClientId, command.OptionId) {
 
@@ -225,7 +228,7 @@ func (kv *KVServer) applier() {
 
 			if msg.SnapshotValid {
 				kv.mu.Lock()
-
+				DPrintf("%d SnapshotValid: kv.lastIncludeIndex =%d, msg.SnapshotIndex=%d\n", kv.me, kv.lastIncludeIndex, msg.SnapshotIndex)
 				kv.ReadSnapshot(msg.Snapshot)
 				kv.lastIncludeIndex = msg.SnapshotIndex
 
@@ -270,8 +273,7 @@ func (kv *KVServer) ReadSnapshot(data []byte) {
 	if data == nil || len(data) < 1 {
 		return
 	}
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
+
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 

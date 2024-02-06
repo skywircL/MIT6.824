@@ -89,6 +89,9 @@ type Raft struct {
 	applyCh chan ApplyMsg
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+	waitingSnapshot []byte
+	waitingIndex    int // lastIncludedIndex
+	waitingTerm     int // lastIncludedTerm
 
 }
 
@@ -229,7 +232,13 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.isleader = false
 	rf.state = Follower
 	if args.LastIncludeIndex < rf.commitIndex {
+		rf.persist()
 		return
+	}
+	if rf.waitingIndex-1 < args.LastIncludeIndex {
+		rf.waitingSnapshot = args.Data
+		rf.waitingTerm = args.LastIncludeTerm
+		rf.waitingIndex = args.LastIncludeIndex + 1
 	}
 
 	rf.commitIndex = args.LastIncludeIndex + 1
@@ -256,14 +265,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	raftstate := w.Bytes()
 	rf.persister.Save(raftstate, args.Data)
 
-	go func() {
-		rf.applyCh <- ApplyMsg{
-			SnapshotValid: true,
-			Snapshot:      args.Data,
-			SnapshotTerm:  args.LastIncludeTerm,
-			SnapshotIndex: args.LastIncludeIndex + 1,
-		}
-	}()
+	rf.applyCond.Broadcast()
 	return
 }
 
@@ -283,7 +285,9 @@ func (rf *Raft) SendInstallSnapshot(i int) {
 	if ok {
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
-
+		if rf.state != Leader {
+			return
+		}
 		if reply.Term > rf.currentTerm {
 			rf.currentTerm = args.Term
 			rf.votedFor = -1
@@ -312,7 +316,18 @@ func (rf *Raft) applier() {
 		if rf.lastApplied < firstIndex {
 			rf.lastApplied = firstIndex
 		}
-		if rf.lastApplied < rf.commitIndex {
+		if rf.waitingSnapshot != nil {
+			DPrintf("%v: deliver snapshot\n", rf.me)
+			am := ApplyMsg{}
+			am.SnapshotValid = true
+			am.Snapshot = rf.waitingSnapshot
+			am.SnapshotIndex = rf.waitingIndex
+			am.SnapshotTerm = rf.waitingTerm
+			rf.waitingSnapshot = nil
+			rf.mu.Unlock()
+			rf.applyCh <- am
+			rf.mu.Lock()
+		} else if rf.lastApplied < rf.commitIndex {
 			rf.lastApplied++
 			aMsg := ApplyMsg{
 				CommandValid: true,
@@ -388,6 +403,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 		curIndex := len(rf.log) + rf.lastIncludedIndex
 		if rf.lastIncludedIndex > args.PrevLogIndex {
+			DPrintf("%d rf.lastIncludedIndex= %d > args.PrevLogIndex=%d\n", rf.me, rf.lastIncludedIndex, args.PrevLogIndex)
 			reply.Success = false
 			reply.FastGoBackIndex = rf.lastIncludedIndex + 1
 			return
@@ -443,6 +459,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		if !rf.CheckPreLogIndex(args) {
 			curIndex := len(rf.log) + rf.lastIncludedIndex
 			if rf.lastIncludedIndex > args.PrevLogIndex {
+				DPrintf("%d rf.lastIncludedIndex= %d > args.PrevLogIndex=%d\n", rf.me, rf.lastIncludedIndex, args.PrevLogIndex)
 				reply.Success = false
 				reply.FastGoBackIndex = rf.lastIncludedIndex + 1
 				return
@@ -848,6 +865,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.lastIncludedIndex = -1
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
+	if rf.lastIncludedIndex > 0 {
+		rf.lastApplied = rf.lastIncludedIndex + 1
+		rf.commitIndex = rf.lastApplied
+	}
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
